@@ -1,0 +1,1262 @@
+SKYPVP UTILS — COMPLETE MASTER BUILD PROMPT
+
+PROJECT NAME: SkyPvP Utils
+PLATFORM: Discord
+GAME SERVER: PikaNetwork
+GAME MODE: SkyPvP
+PROJECT TYPE: Private Discord utility bot
+
+==================================================
+1. PROJECT OVERVIEW
+==================================================
+
+Build a complete, production-ready Discord bot called SkyPvP Utils, specifically designed for PikaNetwork SkyPvP.
+
+The bot should provide:
+
+- Player statistics and profiles.
+- Player tracking and stat updates.
+- Leaderboards and fight information.
+- Public auction notifications.
+- Personal auction alerts.
+- SkyPvP event notifications.
+- East and West KOTH monitoring.
+- Stronghold notifications.
+- Outpost monitoring.
+- A one-way Minecraft public chat bridge.
+- Optional Mineflayer integration.
+- Owner and administrator management commands.
+- Configurable logging.
+- Global public command controls.
+- Professional update announcements through /updatelogs.
+
+This must be a real, functional application, not a demo, mockup, or collection of placeholder commands.
+
+Do not fabricate information or create fake integrations.
+
+If a feature requires an unavailable API, undocumented endpoint, or permission from PikaNetwork, implement a clean provider interface and explain exactly what is needed to activate it.
+
+==================================================
+2. TECHNOLOGY STACK
+==================================================
+
+Use:
+
+- Node.js 22+
+- TypeScript with strict mode enabled.
+- Discord.js v14.
+- PostgreSQL.
+- Prisma ORM.
+- Redis.
+- BullMQ for background jobs.
+- Zod for input and configuration validation.
+- Pino for structured logging.
+- Vitest for automated tests.
+- Docker and Docker Compose.
+
+Use a modular, maintainable architecture.
+
+Separate:
+
+- Discord commands.
+- Discord event handlers.
+- Permission management.
+- Database access.
+- External API integrations.
+- Mineflayer integration.
+- Auction providers.
+- Event monitoring.
+- KOTH monitoring.
+- Stronghold monitoring.
+- Outpost monitoring.
+- Chat bridge.
+- Background workers.
+- Notification delivery.
+- Logging.
+- Configuration.
+- Security utilities.
+
+Avoid placing the entire application inside one large file.
+
+Use clear naming, reusable services, interfaces, types, and centralized configuration.
+
+==================================================
+3. DESIGN AND DISCORD EMBED REQUIREMENTS
+==================================================
+
+Every Discord response should have a consistent, polished design.
+
+Use professional embeds with:
+
+- Clear titles.
+- Short descriptions.
+- Organized fields.
+- Relevant emojis.
+- Consistent colors.
+- Timestamps where appropriate.
+- Readable formatting.
+- Useful footer information where appropriate.
+
+Avoid generic, cluttered, excessively colorful, or spammy embeds.
+
+Use ephemeral responses for private configuration, personal information, sensitive operations, and owner-only previews.
+
+Use buttons, selects, and modals where they improve the user experience.
+
+Every interactive component must have proper permission validation.
+
+Handle expired interactions and failed component interactions gracefully.
+
+Do not expose internal stack traces, secrets, passwords, API keys, or private configuration to users.
+
+==================================================
+4. DEVELOPMENT RULES
+==================================================
+
+These rules are mandatory:
+
+1. Never use fake production data.
+2. Never hardcode example auction listings.
+3. Never fabricate player statistics.
+4. Never fabricate event states.
+5. Never invent KOTH or Stronghold capture information.
+6. Never invent Outpost cooldowns or ownership.
+7. Never pretend an integration is operational when it is not.
+8. Never leave important features as TODO comments.
+9. Never silently remove a requirement.
+10. Never replace real functionality with placeholder responses.
+11. Validate all external API responses.
+12. Handle external service failures gracefully.
+13. Include proper database persistence.
+14. Include meaningful automated tests.
+15. Document limitations honestly.
+
+If a requested feature cannot be completed because its data source is unavailable, explain the exact limitation and implement the provider interface necessary to support a future legitimate data source.
+
+==================================================
+5. PIKANETWORK OFFICIAL API
+==================================================
+
+Use the official PikaNetwork Stats API wherever applicable.
+
+API BASE:
+https://stats.pika-network.net/api
+
+DOCUMENTATION:
+https://stats.pika-network.net/docs
+
+Use documented endpoints for supported information such as:
+
+- Player profiles.
+- SkyPvP statistics.
+- Player history.
+- Leaderboards.
+- Fight information.
+- Match information.
+- Teams where supported.
+- Event information where supported.
+- Other documented SkyPvP information.
+
+Do not invent endpoints.
+
+The API supports API-key authentication through the X-Api-Key header.
+
+Read the API documentation before implementing endpoint integrations.
+
+Implement a centralized PikaNetwork API client.
+
+Requirements:
+
+- API key loaded from environment variables.
+- X-Api-Key authentication.
+- Request timeout handling.
+- Response validation.
+- Redis caching.
+- Rate-limit handling.
+- Retry logic with exponential backoff.
+- Respect Retry-After headers.
+- Respect rate-limit response headers.
+- Request deduplication where practical.
+- Centralized API error handling.
+- Structured API logs without credentials.
+- Graceful handling of downtime.
+
+The documented rate limit is 120 requests per minute per key.
+
+Design the system to normally remain below approximately 60–80 requests per minute, leaving capacity for unexpected requests and user commands.
+
+Do not create multiple API keys to bypass the rate limit.
+
+Use configurable cache durations for different data types.
+
+Avoid fetching identical information repeatedly when it is already cached.
+
+==================================================
+6. PLAYER INFORMATION AND TRACKING
+==================================================
+
+Implement real player information commands.
+
+Users should be able to:
+
+- View a player's profile.
+- View SkyPvP statistics.
+- View available player history.
+- Compare two players.
+- View leaderboards.
+- View available fight information.
+- Track selected players.
+- Remove tracked players.
+- View their tracked player list.
+
+Use actual documented API information.
+
+Player tracking should store historical snapshots so the bot can compare previous and current statistics.
+
+Where supported, display:
+
+- Player username.
+- Available statistics.
+- Previous values.
+- Current values.
+- Changes since the previous snapshot.
+- Last updated timestamp.
+
+Do not claim real-time tracking if the API only supports periodic snapshots.
+
+Do not implement prohibited online-status tracking.
+
+Do not assume an undocumented endpoint exists.
+
+==================================================
+7. MINEFLAYER INTEGRATION
+==================================================
+
+Implement an optional Mineflayer integration.
+
+The intended use is an interactive observation account that can connect to PikaNetwork SkyPvP and observe permitted game information.
+
+The account will use cracked/offline-mode authentication.
+
+The owner should be able to configure:
+
+- Minecraft username.
+- Minecraft password.
+- Connection settings.
+- Reconnection behavior.
+- Integration status.
+
+Potential observation capabilities:
+
+- Connect to PikaNetwork.
+- Monitor connection status.
+- Read permitted public game information.
+- Observe menus only where explicitly permitted.
+- Observe auction information only where permitted and technically available.
+- Observe event information only where permitted and technically available.
+- Observe other relevant game-state information where permitted.
+
+IMPORTANT SERVER RULE COMPLIANCE:
+
+Do not assume Mineflayer automation is permitted.
+
+Verify current PikaNetwork rules and obtain explicit permission from PikaNetwork staff before enabling any integration that interacts with the game, menus, auction house, or chat.
+
+Keep the integration read-only and non-gameplay.
+
+Do not implement:
+
+- Combat automation.
+- Automated farming.
+- Automated looting.
+- Automated trading.
+- Automated purchasing.
+- Gameplay movement automation.
+- Automated chat messages.
+- Exploits.
+- Anti-cheat bypasses.
+- Any feature designed to bypass server restrictions.
+
+If a requested interaction is not permitted, leave it disabled.
+
+ACCOUNT SECURITY:
+
+- Encrypt stored credentials at rest.
+- Use an encryption key from environment variables.
+- Never display passwords in Discord.
+- Never log credentials.
+- Use private ephemeral configuration interactions.
+- Allow the owner to test the connection.
+- Allow the owner to disconnect the account.
+- Allow the owner to remove stored credentials.
+- Never hardcode account details.
+
+Provide owner commands:
+
+/owner account configure
+/owner account status
+/owner account test
+/owner account reconnect
+/owner account disconnect
+/owner account update
+/owner account remove
+
+==================================================
+8. AUCTION SYSTEM
+==================================================
+
+Build a complete auction notification architecture for PikaNetwork SkyPvP.
+
+There must be TWO separate systems.
+
+A. PUBLIC AUCTION FEED
+
+Create a dedicated configurable Discord channel.
+
+The public feed should display every newly detected auction listing.
+
+Include available information such as:
+
+- Item name.
+- Item quantity.
+- Seller.
+- Starting price.
+- Current price.
+- Buyout price, if available.
+- Auction duration or expiration, if available.
+- Detection timestamp.
+
+Only show information that the source actually provides.
+
+Use professional embeds.
+
+Prevent duplicate notifications.
+
+Store processed auction identifiers in the database.
+
+B. PERSONAL AUCTION ALERTS
+
+Allow each Discord user to configure personal auction watches.
+
+Users should be able to:
+
+- Create an auction watch.
+- Specify an item.
+- Set a maximum price.
+- View active watches.
+- Edit watches.
+- Pause watches.
+- Resume watches.
+- Delete watches.
+- Enable or disable personal alerts.
+
+When a matching listing is detected, send the user a private DM with a clean auction embed.
+
+Respect the user's individual filters.
+
+Handle closed DMs without crashing the bot.
+
+SUGGESTED COMMANDS:
+
+/auction search
+/auction watch
+/auction watches
+/auction watchlist
+/auction edit
+/auction pause
+/auction resume
+/auction delete
+/auction alerts
+
+AUCTION DATA SOURCE REQUIREMENTS:
+
+Do not assume the official PikaNetwork Stats API provides active auction listings.
+
+Its documentation must be checked.
+
+Create a modular AuctionProvider interface.
+
+Potential sources may include an explicitly permitted Mineflayer observation integration or another legitimate data source.
+
+If no reliable, permitted data source is available:
+
+- Build the auction architecture.
+- Build the database models.
+- Build commands and configuration.
+- Build notification matching logic.
+- Keep live listing detection disabled.
+- Clearly explain what is required to activate it.
+- Never create fake listings.
+- Never claim the auction system is live.
+
+Keep public auction notifications and personal alerts independent.
+==================================================
+9. ONE-WAY MINECRAFT PUBLIC CHAT BRIDGE
+==================================================
+
+Build a one-way Minecraft-to-Discord public chat bridge.
+
+DIRECTION:
+
+Minecraft public chat → Discord
+
+This must be strictly one-way.
+
+There must be absolutely NO Discord-to-Minecraft messaging functionality.
+
+Discord users must never be able to send messages into Minecraft through this bot.
+
+Create a dedicated configurable Discord channel.
+
+Only forward permitted public server chat messages.
+
+Do not forward:
+
+- Private messages.
+- Party chat.
+- Guild chat.
+- Staff-only messages.
+- Private conversations.
+- Restricted channels.
+
+FORMATTING:
+
+Preserve original message content as accurately as possible.
+
+Preserve:
+
+- Player usernames.
+- Original message text.
+- Emojis.
+- Symbols.
+- Formatting codes where possible.
+- Original message order.
+
+Discord does not support arbitrary per-character Minecraft text colors in ordinary messages.
+
+Use the closest accurate Discord representation without unnecessarily modifying the original message.
+
+Do not invent player names or messages.
+
+RELIABILITY:
+
+- Connection status monitoring.
+- Automatic recovery after disconnections.
+- Message deduplication.
+- Rate-limit protection.
+- Safe message-length handling.
+- Error logging.
+- Configurable enable/disable setting.
+
+If public chat cannot be accessed through a reliable and permitted source, report that limitation.
+
+Do not pretend the bridge is operational without a real data source.
+
+==================================================
+10. SKY PVP EVENT NOTIFICATIONS
+==================================================
+
+Implement an event notification system for these SIX events:
+
+1. Floral Fortune
+2. Envoy Drops
+3. Blood Lust
+4. Gold Rush
+5. Hard Point
+6. KOTL (King of the Ladder)
+
+Each event must have:
+
+- Its own configurable Discord role.
+- Independent notification settings.
+- A configurable event notification channel.
+- Accurate status detection.
+- Duplicate notification prevention.
+
+Use separate roles for every event.
+
+Example:
+
+Floral Fortune → Floral Fortune role
+Envoy Drops → Envoy Drops role
+Blood Lust → Blood Lust role
+Gold Rush → Gold Rush role
+Hard Point → Hard Point role
+KOTL → KOTL role
+
+When an event starts, notify only the role assigned to that event.
+
+Do not use one universal event role.
+
+Do not ping unrelated roles.
+
+Do not send duplicate alerts for the same event transition.
+
+Use clean event announcement embeds.
+
+Include available information such as:
+
+- Event name.
+- Event status.
+- Start time.
+- Relevant details.
+- Detection timestamp.
+
+Only display verified information.
+
+Do not assume the official API exposes live event status.
+
+Use a provider architecture so event data sources can be changed independently.
+
+==================================================
+11. KOTH NOTIFICATION SYSTEM
+==================================================
+
+Implement a separate KOTH monitoring system.
+
+There are exactly TWO KOTH locations:
+
+- East KOTH.
+- West KOTH.
+
+Both locations must use ONE shared configurable Discord role.
+
+Create a dedicated KOTH notification channel.
+
+When reliable information is available, track:
+
+- East KOTH status.
+- West KOTH status.
+- KOTH starting.
+- KOTH becoming active.
+- Capture progress.
+- Player currently capturing.
+- Capture completion.
+- Captured location.
+- Relevant state transitions.
+
+Notify the shared KOTH role for meaningful KOTH events.
+
+Do not ping the role for every small progress update.
+
+Avoid duplicate notifications.
+
+If the system can reliably identify the capturing player, display their username.
+
+If the information is unavailable, do not guess.
+
+Keep KOTH monitoring separate from the general event notification system.
+
+==================================================
+12. STRONGHOLD NOTIFICATIONS
+==================================================
+
+Implement a separate Stronghold monitoring system.
+
+Use:
+
+- A dedicated Stronghold Discord channel.
+- Its own configurable Stronghold role.
+- Independent notification settings.
+
+Track and report, where reliable data is available:
+
+- Stronghold event starting.
+- Stronghold becoming active.
+- Capture activity.
+- Current capturing player.
+- Capture progress.
+- Capture completion.
+- Relevant Stronghold state changes.
+
+Do not reuse the KOTH role.
+
+Do not mix Stronghold notifications with ordinary event notifications.
+
+Do not fabricate capture progress or player information.
+
+Use clean notification embeds.
+
+Prevent duplicate alerts.
+
+==================================================
+13. OUTPOST MONITORING
+==================================================
+
+Create a dedicated Outpost information channel.
+
+Monitor these FOUR outposts:
+
+1. Souls
+2. Damage
+3. Resistance
+4. Luckyblocks
+
+This system is informational only.
+
+ABSOLUTELY NO ROLE PINGS.
+
+Never use:
+
+- @everyone
+- @here
+- Discord role mentions.
+- Mass notifications.
+
+Display the following information for each outpost, where available:
+
+- Outpost name.
+- Current controlling team.
+- Current owner.
+- Capture status.
+- Current capturing player, if available.
+- Cooldown remaining.
+- Availability status.
+- Last updated timestamp.
+
+Use one continuously updated Discord embed or message whenever practical.
+
+Update the existing message instead of creating unnecessary new messages.
+
+Track:
+
+- Ownership changes.
+- Capture starts.
+- Capture progress.
+- Capture completion.
+- Cooldown changes.
+- Outpost availability.
+- Relevant status changes.
+
+Display all four outposts separately and clearly.
+
+If a value is unavailable, show an appropriate unavailable state.
+
+Never invent:
+
+- Cooldown durations.
+- Controlling teams.
+- Capture progress.
+- Player names.
+- Availability information.
+
+Allow the owner to configure the Outpost channel.
+
+Allow individual Outpost monitoring features to be enabled or disabled.
+
+Persist the last known state in the database.
+
+Avoid unnecessary message edits.
+
+==================================================
+14. COMMAND SYSTEM AND PERMISSIONS
+==================================================
+
+Organize all slash commands into THREE permission levels.
+
+A. PUBLIC COMMANDS
+
+Available to ordinary users when public commands are enabled.
+
+Suggested commands:
+
+/help
+/ping
+/profile
+/player
+/stats
+/compare
+/leaderboard
+/fights
+/killfeed
+/track add
+/track remove
+/track list
+/track info
+/auction search
+/auction watch
+/auction watches
+/auction watchlist
+/auction edit
+/auction pause
+/auction resume
+/auction delete
+/auction alerts
+/events
+/chat status
+
+Every command must have:
+
+- A clear description.
+- Validated arguments.
+- Correct permission checks.
+- Proper error handling.
+- Useful output.
+- Appropriate ephemeral or public response behavior.
+
+Only implement commands that can return real information.
+
+B. ADMIN COMMANDS
+
+Available to authorized Discord server administrators.
+
+Suggested commands:
+
+/setup
+/config view
+/config channel
+/config roles
+/config alerts
+/config chat
+/auction feed
+/auction feed toggle
+/auction feed test
+/alerts test
+/tracking settings
+/server stats
+
+Admins must not automatically receive owner privileges.
+
+Check administrator permissions server-side.
+
+C. OWNER COMMANDS
+
+Only the configured bot owner Discord ID can use these commands.
+
+Suggested commands:
+
+/owner status
+/owner maintenance
+/owner reload
+/owner shutdown
+/owner servers
+/owner permissions
+/owner blacklist
+/owner announce
+
+/owner events
+/owner events role set
+/owner events channel set
+
+/owner koth
+/owner stronghold
+/owner outposts
+
+/owner auction status
+/owner auction source
+
+/owner chat status
+/owner chat configure
+
+/owner account configure
+/owner account status
+/owner account test
+/owner account reconnect
+/owner account disconnect
+/owner account update
+/owner account remove
+
+/owner logs setup
+/owner logs view
+/owner logs channel set
+/owner logs channel remove
+/owner logs test
+/owner logs toggle
+/owner logs status
+
+/owner settings public-commands
+/owner settings public-commands enable
+/owner settings public-commands disable
+
+/owner updates channel set
+/owner updates channel view
+/owner updates channel remove
+/owner updates test
+
+/updatelogs
+
+PERMISSION SECURITY:
+
+- Compare the invoking user's exact Discord ID with the configured owner ID.
+- Do not rely only on Discord administrator permissions.
+- Do not trust command visibility as an authorization mechanism.
+- Verify every command on the backend.
+- Verify every button, modal, and select-menu interaction.
+- Deny unauthorized requests.
+- Log important unauthorized owner-command attempts.
+
+==================================================
+15. GLOBAL PUBLIC COMMAND TOGGLE
+==================================================
+
+Implement a persistent global public command setting.
+
+OWNER COMMANDS:
+
+/owner settings public-commands
+/owner settings public-commands enable
+/owner settings public-commands disable
+
+When public commands are disabled:
+
+- Regular users cannot use public commands.
+- Public commands return a clean private embed explaining that public commands are temporarily disabled.
+- Admin configuration commands continue working.
+- Owner commands continue working.
+- Background services continue working unless separately disabled.
+- Existing user watches and tracking configurations remain saved.
+
+When enabled, public commands become available again.
+
+This setting must survive restarts.
+
+==================================================
+16. LOGGING SYSTEM
+==================================================
+
+Implement a configurable logging system.
+
+The owner must be able to assign separate Discord channels to different categories.
+
+LOGGING CATEGORIES:
+
+- Command logs.
+- Admin logs.
+- Owner logs.
+- Auction logs.
+- Event logs.
+- KOTH logs.
+- Stronghold logs.
+- Outpost logs.
+- Chat bridge logs.
+- Mineflayer logs.
+- System logs.
+- API logs.
+- Update publication logs.
+
+COMMANDS:
+
+/owner logs setup
+/owner logs view
+/owner logs channel set
+/owner logs channel remove
+/owner logs test
+/owner logs toggle
+/owner logs status
+
+The owner must be able to:
+
+- Set a channel for a category.
+- Remove a category's logging channel.
+- Enable or disable a category.
+- Test a logging channel.
+- View the current logging configuration.
+
+LOGGING REQUIREMENTS:
+
+- Persist settings in PostgreSQL.
+- Use structured log records.
+- Include timestamps.
+- Include relevant user IDs and command names.
+- Include error context without exposing secrets.
+- Never log passwords.
+- Never log API keys.
+- Never log authentication tokens.
+- Never log private chat.
+- Never log sensitive credentials.
+- Use asynchronous delivery.
+- Handle failed Discord logging without crashing the bot.
+- Persist important audit logs.
+
+Record important configuration changes and owner actions.
+
+==================================================
+17. OWNER-ONLY /updatelogs COMMAND
+==================================================
+
+Implement an owner-only command named:
+
+/updatelogs
+
+This command publishes professional release announcements to a configurable Discord updates channel.
+
+It is NOT the same as diagnostic logging.
+
+Only the configured bot owner ID may execute it.
+
+UPDATE INFORMATION:
+
+Allow the owner to provide:
+
+- Update title.
+- Version or release tag.
+- Short description.
+- New features.
+- Improvements and changes.
+- Bug fixes.
+- Optional additional notes.
+- Release timestamp.
+
+Use slash command options and/or Discord modals for longer text.
+
+UPDATES CHANNEL CONFIGURATION:
+
+/owner updates channel set
+/owner updates channel view
+/owner updates channel remove
+/owner updates test
+
+PUBLICATION WORKFLOW:
+
+1. Owner executes /updatelogs.
+2. Bot collects the update information.
+3. Validate all supplied information.
+4. Generate a private preview embed.
+5. Display the destination channel.
+6. Display Confirm and Cancel buttons.
+7. Publish only after explicit confirmation.
+8. Cancel without publishing if Cancel is selected.
+
+Every modal and button must verify the owner ID.
+
+UPDATE EMBED DESIGN:
+
+Create a clean, premium-looking release announcement.
+
+Include:
+
+- Update announcement title.
+- Version or release tag.
+- Short description.
+- New Features section.
+- Improvements section.
+- Bug Fixes section.
+- Optional Notes section.
+- Release timestamp.
+- Consistent branding.
+
+Do not show empty sections.
+
+Respect Discord embed and message limits.
+
+If release notes are too long, split them into multiple organized embeds without silently deleting information.
+
+PUBLICATION RECORDS:
+
+Store every successfully published update in PostgreSQL.
+
+Save:
+
+- Title.
+- Version.
+- Description.
+- Features.
+- Improvements.
+- Bug fixes.
+- Additional notes.
+- Publisher Discord ID.
+- Publication timestamp.
+- Destination channel ID.
+- Published message ID.
+
+After publication, send the owner a private confirmation with a direct link to the announcement.
+
+If publication fails, report the failure.
+
+Never claim success unless Discord confirms publication.
+
+Record publication success and failure in the audit logs.
+
+==================================================
+18. DATABASE ARCHITECTURE
+==================================================
+
+Use PostgreSQL with Prisma ORM.
+
+Design proper relational database models.
+
+Suggested models:
+
+- GuildConfig
+- UserProfile
+- TrackedPlayer
+- PlayerSnapshot
+- NotificationPreference
+- AuctionWatch
+- AuctionListing
+- EventRecord
+- ProcessedFight
+- AlertHistory
+- ApiCache
+- AdminAuditLog
+- LogConfiguration
+- OutpostRecord
+- UpdateAnnouncement
+- MineflayerAccountConfig
+- ChatBridgeConfig
+- PublicCommandSettings
+
+Use:
+
+- Correct relations.
+- Unique constraints.
+- Useful indexes.
+- Created and updated timestamps.
+- Database migrations.
+- Appropriate validation.
+- Transactional operations where needed.
+
+Avoid unnecessary duplication.
+
+Persist important settings so they survive bot restarts.
+
+==================================================
+19. REDIS AND BACKGROUND JOBS
+==================================================
+
+Use Redis and BullMQ.
+
+Background jobs should handle:
+
+- API polling.
+- Player stat updates.
+- Auction source polling.
+- Auction notification delivery.
+- Event monitoring.
+- KOTH monitoring.
+- Stronghold monitoring.
+- Outpost updates.
+- Retryable Discord notifications.
+- Cleanup jobs.
+
+Use separate queues where appropriate.
+
+Implement:
+
+- Retry policies.
+- Exponential backoff.
+- Job deduplication.
+- Rate limiting.
+- Failure handling.
+- Graceful shutdown.
+- Job monitoring.
+
+The Discord bot must remain responsive while background jobs execute.
+
+One failed integration must never crash unrelated systems.
+
+==================================================
+20. SECURITY AND CONFIGURATION
+==================================================
+
+Use environment variables for secrets and deployment configuration.
+
+Create a complete .env.example file.
+
+Include variables for:
+
+- Discord bot token.
+- Discord application ID.
+- Discord owner ID.
+- Discord test guild ID, if needed.
+- PostgreSQL connection URL.
+- Redis connection URL.
+- PikaNetwork API key.
+- Encryption key.
+- Mineflayer configuration.
+- Logging configuration.
+- Application environment.
+
+Never commit a real .env file.
+
+Never hardcode credentials.
+
+Never expose secrets in Discord or logs.
+
+Validate configuration during startup.
+
+If a required value is missing, display a clear startup error.
+
+SECURITY REQUIREMENTS:
+
+- Validate all slash command inputs.
+- Enforce permissions server-side.
+- Restrict owner commands to the configured owner ID.
+- Encrypt sensitive credentials at rest.
+- Protect buttons and modal interactions.
+- Prevent command abuse.
+- Apply rate limits where appropriate.
+- Prevent duplicate notifications.
+- Prevent unauthorized configuration changes.
+- Use Prisma's safe query mechanisms.
+- Never trust a user-provided Discord ID as proof of authorization.
+
+==================================================
+21. TESTING
+==================================================
+
+Use Vitest.
+
+Write meaningful automated tests for:
+
+- Permission checks.
+- Public command toggle.
+- Owner-only command restrictions.
+- Admin restrictions.
+- API response validation.
+- API rate-limit handling.
+- Database operations.
+- Auction watch matching.
+- Auction notification deduplication.
+- Event notification deduplication.
+- KOTH state transitions.
+- Stronghold state transitions.
+- Outpost state updates.
+- Chat bridge filtering.
+- Update announcement validation.
+- Update announcement confirmation.
+- Unauthorized button interactions.
+- Logging failure handling.
+
+Mock external services only inside tests.
+
+Never use mocked data as a production data source.
+
+Do not consider the project complete just because it compiles.
+
+==================================================
+22. DEPLOYMENT
+==================================================
+
+Provide:
+
+- Dockerfile.
+- Docker Compose configuration.
+- PostgreSQL setup.
+- Redis setup.
+- Prisma migrations.
+- .env.example.
+- Startup scripts.
+- Development scripts.
+- Production build scripts.
+- Health checks.
+- Deployment documentation.
+
+The bot must be deployable on a VPS.
+
+Document:
+
+1. Installing dependencies.
+2. Configuring environment variables.
+3. Creating the Discord application.
+4. Inviting the bot with required permissions.
+5. Setting up PostgreSQL.
+6. Setting up Redis.
+7. Running migrations.
+8. Registering slash commands.
+9. Starting the bot.
+10. Updating the bot.
+11. Backing up the database.
+12. Recovering after failures.
+
+==================================================
+23. IMPLEMENTATION PHASES
+==================================================
+
+Build in logical phases.
+
+PHASE 1:
+Project structure, configuration, database, Discord connection, and permission system.
+
+PHASE 2:
+Official PikaNetwork API integration and player commands.
+
+PHASE 3:
+Auction provider architecture, auction watches, and notifications.
+
+PHASE 4:
+Event, KOTH, and Stronghold systems.
+
+PHASE 5:
+Outpost monitoring.
+
+PHASE 6:
+One-way public chat bridge.
+
+PHASE 7:
+Mineflayer integration, subject to server permission.
+
+PHASE 8:
+Logging, owner settings, and /updatelogs.
+
+PHASE 9:
+Testing, bug fixing, security review, and deployment documentation.
+
+After every phase:
+
+- Run relevant tests.
+- Fix errors before continuing.
+- Verify actual functionality.
+- Update documentation.
+- Report completed and blocked requirements.
+
+==================================================
+24. FINAL ACCEPTANCE CRITERIA
+==================================================
+
+The final project must:
+
+1. Start successfully with valid configuration.
+2. Connect to Discord.
+3. Register slash commands.
+4. Connect to PostgreSQL.
+5. Connect to Redis.
+6. Enforce public, admin, and owner permissions.
+7. Persist configuration after restarts.
+8. Support the global public command toggle.
+9. Support configurable logging channels.
+10. Support the owner-only /updatelogs command.
+11. Provide a real auction provider architecture without fabricating listings.
+12. Support public and personal auction notifications when a legitimate source is available.
+13. Support the one-way public chat bridge when a permitted source is available.
+14. Support all six requested events.
+15. Support East KOTH and West KOTH with one shared role.
+16. Support separate Stronghold notifications.
+17. Support Souls, Damage, Resistance, and Luckyblocks outpost monitoring without pings.
+18. Support secure Mineflayer account configuration.
+19. Recover gracefully from external service failures.
+20. Include complete deployment documentation.
+
+==================================================
+25. FINAL INSTRUCTIONS TO THE CODING AGENT
+==================================================
+
+Treat this document as the authoritative master specification.
+
+Do not silently remove, simplify, or reinterpret requirements.
+
+Before coding:
+
+1. Read this entire specification.
+2. Create a checklist of every requirement.
+3. Identify dependencies and external data sources.
+4. Identify undocumented or unavailable integrations.
+5. Identify features requiring PikaNetwork permission.
+6. Propose the project architecture.
+7. Present an impementation plan.
+
+Then begin implementation phase by phase.
+
+Do not stop after creating a project structure or a basic Discord bot.
+
+Do not produce a superficial implementation just to claim completion.
+
+Do not create fake live data.
+
+Do not mark an integration as complete until it has been connected to a real, verified data source and tested.
+
+For unavailable integrations, implement the correct architecture and explain exactly what is needed to activate them.
+
+Prioritize reliability, security, maintainability, accurate information, and a polished Discord user experience.
+
+The final result must be a functional, secure, maintainable, production-ready SkyPvP Utils Discord bot.

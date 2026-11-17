@@ -1,0 +1,41 @@
+{
+  "name": "skypvp-utils",
+  "version": "1.0.0",
+  "description": "PikaNetwork SkyPvP Discord utility bot",
+  "main": "dist/index.js",
+  "type": "module",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:prod": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "commands:register": "tsx src/register-commands.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.0",
+    "bullmq": "^5.30.0",
+    "discord.js": "^14.16.0",
+    "ioredis": "^5.4.0",
+    "mineflayer": "^4.23.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.24.0",
+    "dotenv": "^16.4.0",
+    "undici": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prisma": "^6.2.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
