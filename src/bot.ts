@@ -4,6 +4,7 @@ import {
   GatewayIntentBits,
   Partials,
   ActivityType,
+  Events,
 } from 'discord.js';
 import type {
   CommandModule,
@@ -46,7 +47,7 @@ export function registerSelectMenuHandler(handler: SelectMenuHandler): void {
   selectMenuHandlers.push(handler);
 }
 
-client.once('ready', () => {
+client.once(Events.ClientReady, () => {
   log.info(
     { tag: client.user?.tag, guildCount: client.guilds.cache.size },
     'Discord bot client logged in and ready',
