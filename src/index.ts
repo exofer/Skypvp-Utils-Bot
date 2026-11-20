@@ -4,6 +4,10 @@ import { prisma } from './db/prisma.js';
 import { redis } from './utils/redis.js';
 import { createLogger } from './utils/logger.js';
 import { workerManager } from './jobs/workers.js';
+import { mineflayerManager } from './mineflayer/client.js';
+import { mineflayerSecurity } from './mineflayer/security.js';
+import './mineflayer/chat.js';
+import './services/events.js';
 import {
   playerPollingQueue,
   auctionPollingQueue,
@@ -25,6 +29,7 @@ import {
 import { processOutpostMonitor } from './jobs/outpost-monitor.js';
 
 // Import all commands
+import { playerCommand } from './commands/public/player.js';
 import { profileCommand } from './commands/public/profile.js';
 import { statsCommand } from './commands/public/stats.js';
 import { compareCommand } from './commands/public/compare.js';
@@ -34,11 +39,20 @@ import { killfeedCommand } from './commands/public/killfeed.js';
 import { trackCommand } from './commands/public/track.js';
 import { auctionCommand } from './commands/public/auction.js';
 import { eventsCommand } from './commands/public/events.js';
+import { chatCommand } from './commands/public/chat.js';
 import { chatStatusCommand } from './commands/public/chatStatus.js';
+import { teamCommand } from './commands/public/team.js';
+import { balCommand } from './commands/public/bal.js';
+import { baltopCommand, baltopsCommand } from './commands/public/baltop.js';
 import { helpCommand } from './commands/public/help.js';
 import { pingCommand } from './commands/public/ping.js';
 import { setupCommand } from './commands/admin/setup.js';
+import { configCommand } from './commands/admin/config.js';
+import { alertsCommand } from './commands/admin/alerts.js';
+import { trackingCommand } from './commands/admin/tracking.js';
+import { serverStatsCommand } from './commands/admin/serverStats.js';
 import { auctionFeedCommand } from './commands/admin/auctionFeed.js';
+import { ownerCommand } from './commands/owner/owner.js';
 import { updateLogsCommand } from './commands/owner/updatelogs.js';
 import { ownerAccountCommand } from './commands/owner/account.js';
 import { auctionOwnerCommand } from './commands/owner/auctionOwner.js';
@@ -50,6 +64,8 @@ import { chatOwnerCommand } from './commands/owner/chatOwner.js';
 import { logsOwnerCommand } from './commands/owner/logsOwner.js';
 import { settingsOwnerCommand } from './commands/owner/settingsOwner.js';
 import { updatesOwnerCommand } from './commands/owner/updatesOwner.js';
+import { commandsOwnerCommand } from './commands/owner/commandsOwner.js';
+import { ownersOwnerCommand } from './commands/owner/ownersOwner.js';
 
 const log = createLogger('main');
 
@@ -76,6 +92,7 @@ async function bootstrap() {
 
   // 3. Register all commands into collection
   const allCommands = [
+    playerCommand,
     profileCommand,
     statsCommand,
     compareCommand,
@@ -85,11 +102,21 @@ async function bootstrap() {
     trackCommand,
     auctionCommand,
     eventsCommand,
+    chatCommand,
     chatStatusCommand,
+    teamCommand,
+    balCommand,
+    baltopCommand,
+    baltopsCommand,
     helpCommand,
     pingCommand,
     setupCommand,
+    configCommand,
+    alertsCommand,
+    trackingCommand,
+    serverStatsCommand,
     auctionFeedCommand,
+    ownerCommand,
     updateLogsCommand,
     ownerAccountCommand,
     auctionOwnerCommand,
@@ -101,6 +128,8 @@ async function bootstrap() {
     logsOwnerCommand,
     settingsOwnerCommand,
     updatesOwnerCommand,
+    commandsOwnerCommand,
+    ownersOwnerCommand,
   ];
 
   for (const cmd of allCommands) {
@@ -163,6 +192,27 @@ async function bootstrap() {
   } catch (err: any) {
     log.error({ err: err?.message }, 'Failed to log in to Discord gateway');
     process.exit(1);
+  }
+
+  // 7. Auto-connect stored Mineflayer account if configured
+  try {
+    const account = await prisma.mineflayerAccountConfig.findFirst({
+      where: { enabled: true },
+    });
+    if (account) {
+      const creds = await mineflayerSecurity.getCredentials(account.guildId);
+      if (creds) {
+        log.info(
+          { guildId: account.guildId, username: creds.username },
+          'Auto-connecting configured Mineflayer account on startup'
+        );
+        mineflayerManager.connect(creds.username, creds.password).catch((err) => {
+          log.error({ err: err?.message }, 'Error during Mineflayer auto-connect on startup');
+        });
+      }
+    }
+  } catch (err: any) {
+    log.warn({ err: err?.message }, 'Failed to check configured Mineflayer accounts on startup');
   }
 }
 

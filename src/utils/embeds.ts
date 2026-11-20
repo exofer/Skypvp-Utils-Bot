@@ -80,11 +80,11 @@ export function warningEmbed(
 /**
  * Standard embed shown when public commands are disabled.
  */
-export function publicCommandsDisabledEmbed(): EmbedBuilder {
+export function publicCommandsDisabledEmbed(reason?: string): EmbedBuilder {
   return warningEmbed(
-    '⚠️ Public Commands Disabled',
-    'Public commands are temporarily disabled in this server. ' +
-      'Please try again later or contact an administrator.',
+    '⚠️ Command Unavailable',
+    reason ||
+      'Public commands are temporarily disabled in this server. Please try again later or contact an administrator.',
   );
 }
 

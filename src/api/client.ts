@@ -1,4 +1,4 @@
-import { fetch } from 'undici';
+import { fetch, Agent } from 'undici';
 import type { Redis } from 'ioredis';
 import { CACHE_TTL, RATE_LIMITS } from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
@@ -11,6 +11,7 @@ export class PikaApiClient {
   private baseUrl: string;
   private apiKey: string;
   private redis: Redis;
+  private agent: Agent;
 
   // In-flight request deduplication
   private inFlight = new Map<string, Promise<any>>();
@@ -22,6 +23,12 @@ export class PikaApiClient {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.redis = redis;
+    this.agent = new Agent({
+      keepAliveTimeout: 60000,
+      keepAliveMaxTimeout: 600000,
+      pipelining: 1,
+      connections: 10,
+    });
   }
 
   /**
@@ -100,6 +107,7 @@ export class PikaApiClient {
 
       const response = await fetch(url, {
         method: 'GET',
+        dispatcher: this.agent,
         headers: {
           'X-Api-Key': this.apiKey,
           Accept: 'application/json',

@@ -3,18 +3,27 @@ import { PermissionLevel } from '../../permissions/levels.js';
 import type { CommandModule } from '../../types/index.js';
 import { getFights } from '../../api/endpoints.js';
 import { infoEmbed, errorEmbed } from '../../utils/embeds.js';
-import { stripColorCodes } from '../../utils/minecraft.js';
+import { formatWeaponName } from '../../utils/minecraft.js';
 
 export const killfeedCommand: CommandModule = {
   data: new SlashCommandBuilder()
     .setName('killfeed')
-    .setDescription('View live network-wide SkyPvP kill activity'),
+    .setDescription('View live network-wide SkyPvP kill activity')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('limit')
+        .setDescription('Number of recent kills to display (default: 8, max: 20)')
+        .setMinValue(1)
+        .setMaxValue(20)
+        .setRequired(false)
+    ),
   permission: PermissionLevel.PUBLIC,
   execute: async (interaction: ChatInputCommandInteraction) => {
     await interaction.deferReply();
 
     try {
-      const fights = await getFights(8);
+      const limit = interaction.options.getInteger('limit') ?? 8;
+      const fights = await getFights(limit);
 
       const embed = infoEmbed(
         '⚔️ Live SkyPvP Killfeed',
@@ -24,15 +33,26 @@ export const killfeedCommand: CommandModule = {
       if (!fights || fights.length === 0) {
         embed.setDescription('No recent SkyPvP kills found.');
       } else {
-        const lines = fights.map((f) => {
-          const killer = f.killer?.username || 'Unknown';
-          const victim = f.victim?.username || 'Unknown';
-          const weapon = f.killer?.weapon ? ` with *${stripColorCodes(f.killer.weapon)}*` : '';
+        const lines = fights.slice(0, limit).map((f: any) => {
+          const killer = f.winner?.username || f.killer?.username || 'Unknown';
+          const victim = f.loser?.username || f.victim?.username || 'Unknown';
+
+          let weaponText = '';
+          if (f.cause === 'VOID') {
+            weaponText = ' into the void';
+          } else {
+            const wName = formatWeaponName(f.weapon, f.winner?.weapon || f.killer?.weapon);
+            if (wName) {
+              weaponText = ` with *${wName}*`;
+            }
+          }
+
+          const action = f.cause === 'VOID' ? 'knocked' : 'killed';
           const time = f.time ? `<t:${Math.floor(f.time / 1000)}:R>` : '';
-          return `• **${killer}** killed **${victim}**${weapon} ${time}`;
+          return `• **${killer}** ${action} **${victim}**${weaponText} ${time}`;
         });
 
-        embed.addFields({ name: 'Latest Kills', value: lines.join('\n') });
+        embed.addFields({ name: `Latest ${lines.length} Kills`, value: lines.join('\n') });
       }
 
       await interaction.editReply({ embeds: [embed] });

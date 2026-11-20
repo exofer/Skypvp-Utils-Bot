@@ -9,24 +9,45 @@ const log = createLogger('koth-service');
 
 export class KothService {
   private lastStates = new Map<string, { active: boolean; capturedBy?: string }>();
+  private isBroadcasting = new Map<string, boolean>();
+  private lastBroadcastTime = new Map<string, number>();
 
   public async checkAndNotifyKoth(): Promise<void> {
     const states = kothProvider.getStates();
 
     for (const state of states) {
       const prev = this.lastStates.get(state.location);
+      const currentlyBroadcasting = this.isBroadcasting.get(state.location) ?? false;
+      const now = Date.now();
+      const lastTime = this.lastBroadcastTime.get(state.location) || 0;
 
       // KOTH Started / Became Active
       if (state.active && (!prev || !prev.active)) {
-        log.info({ location: state.location }, 'KOTH active transition detected');
-        await this.broadcastKothEvent(state, 'START');
+        if (currentlyBroadcasting || now - lastTime < 60 * 1000) continue;
+        this.isBroadcasting.set(state.location, true);
         this.lastStates.set(state.location, { active: true, capturedBy: undefined });
+        this.lastBroadcastTime.set(state.location, now);
+
+        try {
+          log.info({ location: state.location }, 'KOTH active transition detected');
+          await this.broadcastKothEvent(state, 'START');
+        } finally {
+          this.isBroadcasting.set(state.location, false);
+        }
       }
       // KOTH Captured
       else if (!state.active && prev && prev.active && state.capturedBy) {
-        log.info({ location: state.location, winner: state.capturedBy }, 'KOTH captured transition detected');
-        await this.broadcastKothEvent(state, 'CAPTURED');
+        if (currentlyBroadcasting || now - lastTime < 60 * 1000) continue;
+        this.isBroadcasting.set(state.location, true);
         this.lastStates.set(state.location, { active: false, capturedBy: state.capturedBy });
+        this.lastBroadcastTime.set(state.location, now);
+
+        try {
+          log.info({ location: state.location, winner: state.capturedBy }, 'KOTH captured transition detected');
+          await this.broadcastKothEvent(state, 'CAPTURED');
+        } finally {
+          this.isBroadcasting.set(state.location, false);
+        }
       }
     }
   }

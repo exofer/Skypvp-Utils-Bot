@@ -1,14 +1,24 @@
 import { client } from '../bot.js';
 import { prisma } from '../db/prisma.js';
 import { mineflayerManager } from './client.js';
-import { stripColorCodes, sanitizeChat } from '../utils/minecraft.js';
+import {
+  formatChatPayload,
+  isPrivateOrRestrictedMessage,
+  isIgnoredOrSpamMessage,
+  stripColorCodes,
+} from './chatParser.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('chat-bridge');
 
+interface QueuedChatMessage {
+  raw: string;
+  jsonMsg?: any;
+}
+
 export class ChatBridgeService {
   private recentMessageHashes = new Set<string>();
-  private messageQueue: string[] = [];
+  private messageQueue: QueuedChatMessage[] = [];
   private isProcessingQueue = false;
 
   constructor() {
@@ -16,31 +26,27 @@ export class ChatBridgeService {
   }
 
   private registerListener(): void {
-    mineflayerManager.on('chatMessage', async (raw: string) => {
-      await this.handleIncomingMinecraftMessage(raw);
+    mineflayerManager.on('chatMessage', async (raw: string, jsonMsg?: any) => {
+      await this.handleIncomingMinecraftMessage(raw, jsonMsg);
     });
   }
 
-  public async handleIncomingMinecraftMessage(raw: string): Promise<void> {
-    const clean = stripColorCodes(raw).trim();
-    if (!clean) return;
-
-    // Filter non-public messages (PMs, Party, Guild, Staff)
-    const lower = clean.toLowerCase();
-    if (
-      lower.startsWith('from ') ||
-      lower.startsWith('to ') ||
-      lower.includes('[party]') ||
-      lower.includes('[guild]') ||
-      lower.includes('[staff]') ||
-      lower.includes('[msg]') ||
-      lower.includes('whispers:')
-    ) {
-      log.debug({ message: clean }, 'Filtered non-public chat message');
+  public async handleIncomingMinecraftMessage(raw: string, jsonMsg?: any): Promise<void> {
+    // 1. Filter internal connection, lobby prompts, and HUD level progress bar spam
+    if (isIgnoredOrSpamMessage(raw)) {
       return;
     }
 
-    // Deduplication check
+    // 2. Filter non-public messages (PMs, Party, Guild, Staff)
+    if (isPrivateOrRestrictedMessage(raw)) {
+      log.debug({ message: raw }, 'Filtered non-public chat message');
+      return;
+    }
+
+    const clean = stripColorCodes(raw).trim();
+    if (!clean) return;
+
+    // 3. Deduplication check (within 3 seconds)
     const hash = `${Date.now() - (Date.now() % 3000)}_${clean}`;
     if (this.recentMessageHashes.has(hash)) {
       return;
@@ -48,8 +54,8 @@ export class ChatBridgeService {
     this.recentMessageHashes.add(hash);
     setTimeout(() => this.recentMessageHashes.delete(hash), 10000);
 
-    // Queue message
-    this.messageQueue.push(clean);
+    // 4. Queue message for processing
+    this.messageQueue.push({ raw, jsonMsg });
     this.processQueue();
   }
 
@@ -59,17 +65,17 @@ export class ChatBridgeService {
 
     try {
       while (this.messageQueue.length > 0) {
-        const msg = this.messageQueue.shift()!;
-        await this.broadcastToDiscord(msg);
-        // Small delay to prevent Discord rate limits
-        await new Promise((r) => setTimeout(r, 200));
+        const item = this.messageQueue.shift()!;
+        await this.broadcastToDiscord(item);
+        // Delay to prevent Discord rate limits
+        await new Promise((r) => setTimeout(r, 350));
       }
     } finally {
       this.isProcessingQueue = false;
     }
   }
 
-  private async broadcastToDiscord(text: string): Promise<void> {
+  private async broadcastToDiscord(item: QueuedChatMessage): Promise<void> {
     const configs = await prisma.guildConfig.findMany({
       where: {
         chatBridgeEnabled: true,
@@ -77,21 +83,29 @@ export class ChatBridgeService {
       },
     });
 
-    const sanitized = sanitizeChat(text, 1950);
-
     for (const config of configs) {
       if (!config.chatBridgeChannelId) continue;
 
       try {
         const channel = await client.channels.fetch(config.chatBridgeChannelId);
         if (channel && channel.isTextBased() && 'send' in channel) {
+          const style = (config as any).chatBridgeStyle || 'ANSI';
+          const payload = formatChatPayload(item.raw, item.jsonMsg, style);
+
           await (channel as any).send({
-            content: sanitized,
+            ...payload,
             allowedMentions: { parse: [] }, // Never allow pinging Discord users
           });
+          log.info(
+            { guildId: config.guildId, channelId: config.chatBridgeChannelId, style },
+            'Relayed Minecraft chat message to Discord'
+          );
         }
       } catch (err: any) {
-        log.warn({ guildId: config.guildId, err: err?.message }, 'Failed to deliver chat bridge message');
+        log.warn(
+          { guildId: config.guildId, channelId: config.chatBridgeChannelId, err: err?.message },
+          'Failed to deliver chat bridge message'
+        );
       }
     }
   }

@@ -4,9 +4,9 @@ import {
   PermissionFlagsBits,
 } from 'discord.js';
 import { PermissionLevel } from './levels.js';
-import { env } from '../config/env.js';
 import { prisma } from '../db/prisma.js';
 import { createLogger } from '../utils/logger.js';
+import { systemService } from '../services/system.js';
 
 const log = createLogger('permissions');
 
@@ -23,6 +23,22 @@ export async function checkPermission(
   level: PermissionLevel,
 ): Promise<PermissionCheckResult> {
   const userId = interaction.user.id;
+
+  // 1. Blacklist check (Owner cannot be blacklisted)
+  if (!isOwner(userId) && systemService.isBlacklisted(userId)) {
+    return {
+      allowed: false,
+      reason: 'You have been blacklisted from using this bot.',
+    };
+  }
+
+  // 2. Global maintenance mode check (Owner can always bypass)
+  if (!isOwner(userId) && systemService.isMaintenance()) {
+    return {
+      allowed: false,
+      reason: 'The bot is currently in maintenance mode. Please try again later.',
+    };
+  }
 
   switch (level) {
     case PermissionLevel.OWNER: {
@@ -64,19 +80,28 @@ export async function checkPermission(
         return { allowed: true };
       }
 
-      // Check if public commands are enabled for this guild
       const guildId = interaction.guildId;
-      if (!guildId) {
-        return { allowed: true }; // DM context, allow
-      }
+      const commandName = interaction.commandName;
 
-      const enabled = await arePublicCommandsEnabled(guildId);
-      if (!enabled) {
+      // 1. Check if this specific command is disabled
+      if (systemService.isCommandDisabled(commandName, guildId ?? undefined)) {
         return {
           allowed: false,
-          reason: 'Public commands are currently disabled in this server.',
+          reason: `The command \`/${commandName}\` is currently disabled for public use by the bot owner.`,
         };
       }
+
+      // 2. Check if all public commands are disabled for this guild
+      if (guildId) {
+        const enabled = await arePublicCommandsEnabled(guildId);
+        if (!enabled) {
+          return {
+            allowed: false,
+            reason: 'Public commands are currently disabled in this server.',
+          };
+        }
+      }
+
       return { allowed: true };
     }
 
@@ -86,10 +111,17 @@ export async function checkPermission(
 }
 
 /**
- * Check if a user ID matches the configured bot owner.
+ * Check if a user ID matches any configured or dynamic bot owner.
  */
 export function isOwner(userId: string): boolean {
-  return userId === env.DISCORD_OWNER_ID;
+  return systemService.isOwner(userId);
+}
+
+/**
+ * Get all current bot owner IDs.
+ */
+export function getOwnerIds(): string[] {
+  return systemService.getAllOwners();
 }
 
 /**

@@ -33,7 +33,19 @@ export const auctionFeedCommand: CommandModule = {
         )
     )
     .addSubcommand((sub) =>
-      sub.setName('test').setDescription('Send a test auction listing to the feed channel')
+      sub
+        .setName('test')
+        .setDescription('Send a test auction listing to the feed channel')
+        .addStringOption((opt) =>
+          opt
+            .setName('currency')
+            .setDescription('Currency of the test listing')
+            .setRequired(false)
+            .addChoices(
+              { name: 'Money ($)', value: 'MONEY' },
+              { name: 'Gold (🪙)', value: 'GOLD' }
+            )
+        )
     ),
   permission: PermissionLevel.ADMIN,
   execute: async (interaction: ChatInputCommandInteraction) => {
@@ -105,20 +117,23 @@ export const auctionFeedCommand: CommandModule = {
       try {
         const channel = await interaction.client.channels.fetch(config.auctionFeedChannelId);
         if (channel && channel.isTextBased() && 'send' in channel) {
+          const testCurr = interaction.options.getString('currency') || 'MONEY';
+          const isGold = testCurr === 'GOLD';
+
           const testEmbed = infoEmbed(
-            '🏷️ Test SkyPvP Auction Listing',
+            isGold ? '🪙 Test SkyPvP Gold Auction Listing' : '🏷️ Test SkyPvP Auction Listing',
             '**Test Dragon Sword** has been listed on the SkyPvP Auction House!'
           );
-          testEmbed.setColor(COLORS.AUCTION);
+          testEmbed.setColor(isGold ? 0xffaa00 : COLORS.AUCTION);
           testEmbed.addFields([
             { name: '📦 Item', value: 'Test Dragon Sword (x1)', inline: true },
             { name: '👤 Seller', value: '`TestPlayer`', inline: true },
-            { name: '💰 Price', value: '$250,000', inline: true },
+            { name: isGold ? '🪙 Price (Gold)' : '💰 Price', value: isGold ? '🪙 **500** Gold' : '💵 **$250,000**', inline: true },
           ]);
           await (channel as any).send({ embeds: [testEmbed] });
 
           await interaction.editReply({
-            embeds: [successEmbed('Test Sent', `Test listing posted to <#${config.auctionFeedChannelId}>.`)],
+            embeds: [successEmbed('Test Sent', `Test ${isGold ? 'Gold' : 'Money'} listing posted to <#${config.auctionFeedChannelId}>.`)],
           });
         }
       } catch (err: any) {

@@ -7,7 +7,7 @@ import { infoEmbed, successEmbed, errorEmbed } from '../../utils/embeds.js';
 
 export const ownerAccountCommand: CommandModule = {
   data: new SlashCommandBuilder()
-    .setName('account')
+    .setName('owneraccount')
     .setDescription('Owner controls for the Mineflayer observation bot')
     .addSubcommand((sub) =>
       sub
@@ -24,7 +24,10 @@ export const ownerAccountCommand: CommandModule = {
       sub.setName('status').setDescription('Check live Mineflayer connection status')
     )
     .addSubcommand((sub) =>
-      sub.setName('test').setDescription('Test connect to PikaNetwork SkyPvP')
+      sub.setName('connect').setDescription('Connect the Mineflayer bot to PikaNetwork SkyPvP')
+    )
+    .addSubcommand((sub) =>
+      sub.setName('test').setDescription('Alias for testing Mineflayer bot connection')
     )
     .addSubcommand((sub) =>
       sub.setName('reconnect').setDescription('Force reconnect the Mineflayer bot')
@@ -34,6 +37,22 @@ export const ownerAccountCommand: CommandModule = {
     )
     .addSubcommand((sub) =>
       sub.setName('remove').setDescription('Erase stored Minecraft credentials from database')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('send')
+        .setDescription('Send an in-game command as the Mineflayer bot')
+        .addStringOption((opt) =>
+          opt.setName('command').setDescription('The command to send (e.g. /server skypvp)').setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('cmd')
+        .setDescription('Alias for sending an in-game command')
+        .addStringOption((opt) =>
+          opt.setName('command').setDescription('The command to send (e.g. /server skypvp)').setRequired(true)
+        )
     ),
   permission: PermissionLevel.OWNER,
   execute: async (interaction: ChatInputCommandInteraction) => {
@@ -65,16 +84,17 @@ export const ownerAccountCommand: CommandModule = {
         `**Connection**: ${status.connected ? '🟢 Connected' : status.connecting ? '🟡 Connecting' : '🔴 Disconnected'}\n` +
         `**Username**: \`${status.username || 'None'}\`\n` +
         `**Target Server**: \`${status.server}\`\n` +
+        `**Current Location**: \`${status.currentSubserver}\` ${status.inSkyPvP ? '⚔️ **In SkyPvP**' : '⏳ **In Lobby/Hub**'}\n` +
         `**Uptime**: \`${uptimeStr}\`\n` +
         `**Last Error**: \`${status.lastError || 'None'}\``
       );
 
       await interaction.editReply({ embeds: [embed] });
-    } else if (sub === 'test' || sub === 'reconnect') {
+    } else if (sub === 'connect' || sub === 'test' || sub === 'reconnect') {
       const creds = await mineflayerSecurity.getCredentials(guildId);
       if (!creds) {
         await interaction.editReply({
-          embeds: [errorEmbed('No Credentials', 'Run `/account configure` first to set credentials.')],
+          embeds: [errorEmbed('No Credentials', 'Run `/owneraccount configure` first to set credentials.')],
         });
         return;
       }
@@ -90,14 +110,12 @@ export const ownerAccountCommand: CommandModule = {
       const success = await mineflayerManager.connect(creds.username, creds.password);
 
       if (success) {
-        await interaction.followUp({
-          embeds: [successEmbed('Connected', `Successfully connected to PikaNetwork as **${creds.username}**.`)],
-          ephemeral: true,
+        await interaction.editReply({
+          embeds: [successEmbed('Connected', `Successfully connected as **${creds.username}**!`)],
         });
       } else {
-        await interaction.followUp({
-          embeds: [errorEmbed('Connection Failed', `Could not connect: ${mineflayerManager.getStatus().lastError}`)],
-          ephemeral: true,
+        await interaction.editReply({
+          embeds: [errorEmbed('Connection Failed', 'Could not connect. Check console logs for details.')],
         });
       }
     } else if (sub === 'disconnect') {
@@ -109,7 +127,20 @@ export const ownerAccountCommand: CommandModule = {
       await mineflayerSecurity.removeCredentials(guildId);
       mineflayerManager.disconnect();
       await interaction.editReply({
-        embeds: [successEmbed('Credentials Erased', 'Stored credentials have been permanently deleted.')],
+        embeds: [successEmbed('Credentials Removed', 'Stored Minecraft credentials deleted from database.')],
+      });
+    } else if (sub === 'send' || sub === 'cmd') {
+      const command = interaction.options.getString('command', true);
+      if (!mineflayerManager.isConnected()) {
+        await interaction.editReply({
+          embeds: [errorEmbed('Not Connected', 'Mineflayer bot is not connected. Connect first with `/owneraccount connect`.')],
+        });
+        return;
+      }
+
+      mineflayerManager.sendCommand(command);
+      await interaction.editReply({
+        embeds: [successEmbed('Command Sent', `Dispatched in-game command: \`${command}\``)],
       });
     }
   },

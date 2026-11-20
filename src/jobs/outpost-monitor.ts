@@ -5,6 +5,10 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('job-outpost-monitor');
 
 export async function processOutpostMonitor(_job: Job): Promise<void> {
-  log.debug('Updating outpost status board');
-  await outpostService.updateLiveEmbed();
+  log.debug('Running scheduled outpost monitor update');
+  try {
+    await outpostService.updateLiveEmbed(false);
+  } catch (err: any) {
+    log.error({ err: err?.message }, 'Failed during outpost monitor job');
+  }
 }

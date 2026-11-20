@@ -1,7 +1,11 @@
 import { mineflayerManager } from '../mineflayer/client.js';
 import { stripColorCodes } from '../utils/minecraft.js';
+import { outpostObserver, type OutpostType } from '../mineflayer/observers/outpost.js';
+import { createLogger } from '../utils/logger.js';
 
-export type OutpostType = 'SOULS' | 'DAMAGE' | 'RESISTANCE' | 'LUCKYBLOCKS';
+const log = createLogger('outpost-provider');
+
+export type { OutpostType };
 
 export interface OutpostInfo {
   type: OutpostType;
@@ -10,17 +14,21 @@ export interface OutpostInfo {
   controllingTeam?: string;
   owner?: string;
   capturingPlayer?: string;
+  captureProgress?: number;
+  cooldownRemaining?: string;
   cooldownEndsAt?: Date;
+  location?: string;
+  rawLore?: string[];
   lastUpdated: Date;
 }
 
 export class OutpostProvider {
   private outposts: Map<OutpostType, OutpostInfo> = new Map([
     [
-      'SOULS',
+      'RESISTANCE',
       {
-        type: 'SOULS',
-        name: 'Souls Outpost',
+        type: 'RESISTANCE',
+        name: 'Resistance Outpost',
         status: 'AVAILABLE',
         lastUpdated: new Date(),
       },
@@ -35,15 +43,6 @@ export class OutpostProvider {
       },
     ],
     [
-      'RESISTANCE',
-      {
-        type: 'RESISTANCE',
-        name: 'Resistance Outpost',
-        status: 'AVAILABLE',
-        lastUpdated: new Date(),
-      },
-    ],
-    [
       'LUCKYBLOCKS',
       {
         type: 'LUCKYBLOCKS',
@@ -52,10 +51,55 @@ export class OutpostProvider {
         lastUpdated: new Date(),
       },
     ],
+    [
+      'SOULS',
+      {
+        type: 'SOULS',
+        name: 'Souls Outpost',
+        status: 'AVAILABLE',
+        lastUpdated: new Date(),
+      },
+    ],
   ]);
 
   constructor() {
     this.listenToMinecraftChat();
+  }
+
+  /**
+   * Scrape and update live outposts via /outposts GUI in Mineflayer
+   */
+  public async fetchOutposts(diagnosticMode?: boolean): Promise<OutpostInfo[]> {
+    if (!mineflayerManager.isConnected()) {
+      return this.getOutposts();
+    }
+
+    try {
+      const scraped = await outpostObserver.scrapeOutposts(diagnosticMode);
+      if (scraped && scraped.length > 0) {
+        for (const item of scraped) {
+          const current = this.outposts.get(item.type);
+          this.outposts.set(item.type, {
+            type: item.type,
+            name: item.name,
+            status: item.status,
+            controllingTeam: item.controllingTeam ?? current?.controllingTeam,
+            owner: item.owner ?? current?.owner,
+            capturingPlayer: item.capturingPlayer ?? current?.capturingPlayer,
+            captureProgress: item.captureProgress ?? current?.captureProgress,
+            cooldownRemaining: item.cooldownRemaining ?? current?.cooldownRemaining,
+            cooldownEndsAt: item.cooldownEndsAt ?? current?.cooldownEndsAt,
+            location: item.location ?? current?.location,
+            rawLore: item.rawLore,
+            lastUpdated: new Date(),
+          });
+        }
+      }
+    } catch (err: any) {
+      log.error({ err: err?.message }, 'Failed to fetch outposts via GUI scraper');
+    }
+
+    return this.getOutposts();
   }
 
   private listenToMinecraftChat(): void {
@@ -76,7 +120,16 @@ export class OutpostProvider {
               capturingPlayer: undefined,
               lastUpdated: new Date(),
             });
-          } else if (clean.toLowerCase().includes('capturing')) {
+          } else if (clean.toLowerCase().includes('started to claim') || clean.toLowerCase().includes('is claiming')) {
+            const teamMatch = clean.match(/team\s+([a-zA-Z0-9_]{3,16})/i);
+            const team = teamMatch?.[1];
+            this.outposts.set(type, {
+              ...info,
+              status: 'CAPTURING',
+              controllingTeam: team,
+              lastUpdated: new Date(),
+            });
+          } else if (clean.toLowerCase().includes('capturing') || clean.toLowerCase().includes('is capping')) {
             const playerMatch = clean.match(/([a-zA-Z0-9_]{3,16})\s+(?:is capturing|is capping)/i);
             const player = playerMatch?.[1];
             this.outposts.set(type, {

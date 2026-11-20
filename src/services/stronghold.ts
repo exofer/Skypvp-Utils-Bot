@@ -10,23 +10,42 @@ const log = createLogger('stronghold-service');
 export class StrongholdService {
   private lastActive = false;
   private lastCapturedBy?: string;
+  private isBroadcasting = false;
+  private lastBroadcastTime = 0;
 
   public async checkAndNotifyStronghold(): Promise<void> {
     const state = strongholdProvider.getState();
+    const now = Date.now();
 
     // Stronghold started
     if (state.active && !this.lastActive) {
-      log.info('Stronghold start transition detected');
-      await this.broadcastStrongholdEvent(state, 'START');
+      if (this.isBroadcasting || now - this.lastBroadcastTime < 60 * 1000) return;
+      this.isBroadcasting = true;
       this.lastActive = true;
       this.lastCapturedBy = undefined;
+      this.lastBroadcastTime = now;
+
+      try {
+        log.info('Stronghold start transition detected');
+        await this.broadcastStrongholdEvent(state, 'START');
+      } finally {
+        this.isBroadcasting = false;
+      }
     }
     // Stronghold captured
     else if (!state.active && this.lastActive && state.capturedBy && state.capturedBy !== this.lastCapturedBy) {
-      log.info({ winner: state.capturedBy }, 'Stronghold captured transition detected');
-      await this.broadcastStrongholdEvent(state, 'CAPTURED');
+      if (this.isBroadcasting || now - this.lastBroadcastTime < 60 * 1000) return;
+      this.isBroadcasting = true;
       this.lastActive = false;
       this.lastCapturedBy = state.capturedBy;
+      this.lastBroadcastTime = now;
+
+      try {
+        log.info({ winner: state.capturedBy }, 'Stronghold captured transition detected');
+        await this.broadcastStrongholdEvent(state, 'CAPTURED');
+      } finally {
+        this.isBroadcasting = false;
+      }
     }
   }
 

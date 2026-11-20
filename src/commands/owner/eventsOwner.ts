@@ -11,13 +11,50 @@ export const eventsOwnerCommand: CommandModule = {
     .addSubcommand((sub) =>
       sub
         .setName('channel')
-        .setDescription('Set the event notification channel')
+        .setDescription('Set notification channel for all events or a specific event type')
         .addChannelOption((opt) =>
           opt
             .setName('target')
             .setDescription('Destination channel')
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
+        )
+        .addStringOption((opt) =>
+          opt
+            .setName('event')
+            .setDescription('Specific event type (leave empty for general/all SkyPvP events)')
+            .setRequired(false)
+            .addChoices(
+              { name: 'All Events (Default / Fallback)', value: 'ALL' },
+              { name: 'Floral Fortune', value: 'FLORAL_FORTUNE' },
+              { name: 'Envoy Drops', value: 'ENVOY_DROPS' },
+              { name: 'Blood Lust', value: 'BLOOD_LUST' },
+              { name: 'Gold Rush', value: 'GOLD_RUSH' },
+              { name: 'Hard Point', value: 'HARD_POINT' },
+              { name: 'King of the Ladder (KOTL)', value: 'KOTL' },
+              { name: 'KOTH (King of the Hill)', value: 'KOTH' },
+              { name: 'Stronghold', value: 'STRONGHOLD' },
+              { name: 'Outposts', value: 'OUTPOST' }
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('clear-channel')
+        .setDescription('Remove dedicated channel override for an event type (reverts to default)')
+        .addStringOption((opt) =>
+          opt
+            .setName('event')
+            .setDescription('Event type to remove channel override from')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Floral Fortune', value: 'FLORAL_FORTUNE' },
+              { name: 'Envoy Drops', value: 'ENVOY_DROPS' },
+              { name: 'Blood Lust', value: 'BLOOD_LUST' },
+              { name: 'Gold Rush', value: 'GOLD_RUSH' },
+              { name: 'Hard Point', value: 'HARD_POINT' },
+              { name: 'King of the Ladder (KOTL)', value: 'KOTL' }
+            )
         )
     )
     .addSubcommand((sub) =>
@@ -66,14 +103,112 @@ export const eventsOwnerCommand: CommandModule = {
 
     if (sub === 'channel') {
       const channel = interaction.options.getChannel('target', true);
+      const eventType = interaction.options.getString('event') || 'ALL';
+
+      const updateData: Record<string, any> = {};
+      let title = 'Event Channel Configured';
+      let desc = '';
+
+      switch (eventType) {
+        case 'FLORAL_FORTUNE':
+          updateData.floralFortuneChannelId = channel.id;
+          updateData.eventNotificationsEnabled = true;
+          desc = `Dedicated channel for **Floral Fortune** alerts set to <#${channel.id}>.`;
+          break;
+        case 'ENVOY_DROPS':
+          updateData.envoyDropsChannelId = channel.id;
+          updateData.eventNotificationsEnabled = true;
+          desc = `Dedicated channel for **Envoy Drops** alerts set to <#${channel.id}>.`;
+          break;
+        case 'BLOOD_LUST':
+          updateData.bloodLustChannelId = channel.id;
+          updateData.eventNotificationsEnabled = true;
+          desc = `Dedicated channel for **Blood Lust** alerts set to <#${channel.id}>.`;
+          break;
+        case 'GOLD_RUSH':
+          updateData.goldRushChannelId = channel.id;
+          updateData.eventNotificationsEnabled = true;
+          desc = `Dedicated channel for **Gold Rush** alerts set to <#${channel.id}>.`;
+          break;
+        case 'HARD_POINT':
+          updateData.hardPointChannelId = channel.id;
+          updateData.eventNotificationsEnabled = true;
+          desc = `Dedicated channel for **Hard Point** alerts set to <#${channel.id}>.`;
+          break;
+        case 'KOTL':
+          updateData.kotlChannelId = channel.id;
+          updateData.eventNotificationsEnabled = true;
+          desc = `Dedicated channel for **King of the Ladder (KOTL)** alerts set to <#${channel.id}>.`;
+          break;
+        case 'KOTH':
+          updateData.kothChannelId = channel.id;
+          updateData.kothNotificationsEnabled = true;
+          desc = `Channel for **KOTH** alerts set to <#${channel.id}>.`;
+          break;
+        case 'STRONGHOLD':
+          updateData.strongholdChannelId = channel.id;
+          updateData.strongholdNotificationsEnabled = true;
+          desc = `Channel for **Stronghold** alerts set to <#${channel.id}>.`;
+          break;
+        case 'OUTPOST':
+          updateData.outpostChannelId = channel.id;
+          updateData.outpostMonitoringEnabled = true;
+          desc = `Channel for **Outpost Board** set to <#${channel.id}>.`;
+          break;
+        case 'ALL':
+        default:
+          updateData.eventChannelId = channel.id;
+          updateData.eventNotificationsEnabled = true;
+          desc = `Default/Fallback channel for **SkyPvP Events** set to <#${channel.id}>.`;
+          break;
+      }
+
       await prisma.guildConfig.upsert({
         where: { guildId },
-        update: { eventChannelId: channel.id, eventNotificationsEnabled: true },
-        create: { guildId, eventChannelId: channel.id, eventNotificationsEnabled: true },
+        update: updateData,
+        create: { guildId, ...updateData },
       });
 
       await interaction.editReply({
-        embeds: [successEmbed('Event Channel Set', `Event notifications will be posted to <#${channel.id}>.`)],
+        embeds: [successEmbed(title, desc)],
+      });
+    } else if (sub === 'clear-channel') {
+      const eventType = interaction.options.getString('event', true);
+      const updateData: Record<string, any> = {};
+
+      switch (eventType) {
+        case 'FLORAL_FORTUNE':
+          updateData.floralFortuneChannelId = null;
+          break;
+        case 'ENVOY_DROPS':
+          updateData.envoyDropsChannelId = null;
+          break;
+        case 'BLOOD_LUST':
+          updateData.bloodLustChannelId = null;
+          break;
+        case 'GOLD_RUSH':
+          updateData.goldRushChannelId = null;
+          break;
+        case 'HARD_POINT':
+          updateData.hardPointChannelId = null;
+          break;
+        case 'KOTL':
+          updateData.kotlChannelId = null;
+          break;
+      }
+
+      await prisma.guildConfig.update({
+        where: { guildId },
+        data: updateData,
+      });
+
+      await interaction.editReply({
+        embeds: [
+          successEmbed(
+            'Channel Override Cleared',
+            `Removed custom channel override for **${eventType}**. It will now use the default SkyPvP events channel.`
+          ),
+        ],
       });
     } else if (sub === 'role') {
       const eventType = interaction.options.getString('event', true);

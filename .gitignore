@@ -14,8 +14,12 @@ logs/
 *.log
 npm-debug.log*
 
-# OS / Editor
-.DS_Store
+# Database & cache data
+*.db
+*.db-journal
+dump.rdb
+pgdata/
+dev.db
 .idea/
 .vscode/
 *.suo

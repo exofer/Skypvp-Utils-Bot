@@ -49,7 +49,16 @@ export async function getLeaderboard(
   offset = 0,
   limit = 25
 ): Promise<GlobalLeaderboardResponse> {
-  const query = `type=skypvp&stat=${encodeURIComponent(stat)}&interval=${interval}&offset=${offset}&limit=${limit}`;
+  let mappedStat = stat;
+  if (stat === 'balance' || stat === 'baltop' || stat === 'baltops') {
+    mappedStat = 'common.balance';
+  } else if (stat === 'bounty') {
+    mappedStat = 'bounty.highest.received';
+  } else if (stat === 'highest_killstreak') {
+    mappedStat = 'common.highestkillstreak';
+  }
+
+  const query = `type=skypvp&stat=${encodeURIComponent(mappedStat)}&interval=${interval}&offset=${offset}&limit=${limit}&mode=ALL_MODES`;
   return apiClient.get<GlobalLeaderboardResponse>(
     `/leaderboards?${query}`,
     GlobalLeaderboardResponseSchema,
@@ -61,7 +70,16 @@ export async function getLeaderboardTotal(
   stat = 'kills',
   interval: 'total' | 'monthly' | 'weekly' = 'total'
 ): Promise<any> {
-  const query = `type=skypvp&stat=${encodeURIComponent(stat)}&interval=${interval}`;
+  let mappedStat = stat;
+  if (stat === 'balance' || stat === 'baltop' || stat === 'baltops') {
+    mappedStat = 'common.balance';
+  } else if (stat === 'bounty') {
+    mappedStat = 'bounty.highest.received';
+  } else if (stat === 'highest_killstreak') {
+    mappedStat = 'common.highestkillstreak';
+  }
+
+  const query = `type=skypvp&stat=${encodeURIComponent(mappedStat)}&interval=${interval}&mode=ALL_MODES`;
   return apiClient.get<any>(`/leaderboards/total?${query}`, undefined, CACHE_TTL.LEADERBOARD);
 }
 
@@ -103,8 +121,9 @@ export async function getPlayerTeams(username: string): Promise<any[]> {
   return apiClient.get<any[]>(`/players/${encodeURIComponent(username)}/teams`, undefined, CACHE_TTL.PLAYER);
 }
 
-export async function getTeamsTop(limit = 25): Promise<any[]> {
-  return apiClient.get<any[]>(`/teams/skypvp/top?limit=${limit}`, undefined, CACHE_TTL.LEADERBOARD);
+export async function getTeamsTop(limit = 25, offset = 0): Promise<any[]> {
+  const query = `limit=${limit}&offset=${offset}`;
+  return apiClient.get<any[]>(`/teams/skypvp/top?${query}`, undefined, CACHE_TTL.LEADERBOARD);
 }
 
 export async function getTeam(entityId: string): Promise<any> {

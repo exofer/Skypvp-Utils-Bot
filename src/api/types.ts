@@ -43,10 +43,13 @@ export type PlayerLeaderboard = z.infer<typeof PlayerLeaderboardSchema>;
 export const FightSideSchema = z.object({
   username: z.string().nullable().optional(),
   rank: z.string().nullable().optional(),
+  elo: z.number().nullable().optional(),
   kills: z.number().optional(),
   deaths: z.number().optional(),
-  weapon: z.string().nullable().optional(),
+  weapon: z.any().nullable().optional(),
   armour: z.array(z.any()).optional().default([]),
+  sets: z.array(z.any()).optional().default([]),
+  consumables: z.array(z.any()).optional().default([]),
 }).passthrough();
 
 export const FightSchema = z.object({
@@ -55,7 +58,11 @@ export const FightSchema = z.object({
   mode: z.string().optional(),
   server: z.string().nullable().optional(),
   killType: z.string().optional(),
+  cause: z.string().optional(),
   duration: z.number().optional(),
+  weapon: z.any().nullable().optional(),
+  winner: FightSideSchema.optional(),
+  loser: FightSideSchema.optional(),
   killer: FightSideSchema.optional(),
   victim: FightSideSchema.optional(),
 }).passthrough();
@@ -88,3 +95,45 @@ export const MoverSchema = z.object({
 }).passthrough();
 
 export type Mover = z.infer<typeof MoverSchema>;
+
+export interface TeamTopEntry {
+  place: number;
+  entityId: string;
+  displayName: string;
+  value: string;
+}
+
+export interface TeamMember {
+  user: {
+    username: string;
+  };
+  role: string;
+  active: boolean;
+  joinedAt?: number;
+}
+
+export interface TeamDetails {
+  place?: number;
+  team: {
+    gamemode: string;
+    family: string;
+    entityId: string;
+    displayName: string;
+    tag?: string | null;
+    memberCount: number;
+    headlineValue?: number;
+    headline?: string;
+    season?: number;
+    breakdown?: {
+      components?: {
+        points?: string;
+        countingPoints?: string;
+        totalPoints?: string;
+      };
+    };
+    aggStats?: Record<string, number>;
+    members?: TeamMember[];
+  };
+  aggStats?: Record<string, number>;
+  members?: TeamMember[];
+}

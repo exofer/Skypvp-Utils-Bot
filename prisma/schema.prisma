@@ -1,5 +1,5 @@
 // ============================================================
-// SkyPvP Utils — Prisma Schema
+// SkyPvP Utils — Prisma Schema (SQLite / PostgreSQL Compatible)
 // ============================================================
 
 generator client {
@@ -7,109 +7,9 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
-
-// ---- Enums ----
-
-enum PermissionLevel {
-  PUBLIC
-  ADMIN
-  OWNER
-}
-
-enum AuctionWatchStatus {
-  ACTIVE
-  PAUSED
-  DELETED
-}
-
-enum AuctionListingStatus {
-  ACTIVE
-  SOLD
-  EXPIRED
-  CANCELLED
-}
-
-enum EventType {
-  FLORAL_FORTUNE
-  ENVOY_DROPS
-  BLOOD_LUST
-  GOLD_RUSH
-  HARD_POINT
-  KOTL
-}
-
-enum EventStatus {
-  STARTING
-  ACTIVE
-  ENDING
-  ENDED
-}
-
-enum KothLocation {
-  EAST
-  WEST
-}
-
-enum KothStatus {
-  INACTIVE
-  STARTING
-  ACTIVE
-  CAPTURING
-  CAPTURED
-}
-
-enum StrongholdStatus {
-  INACTIVE
-  STARTING
-  ACTIVE
-  CAPTURING
-  CAPTURED
-}
-
-enum OutpostName {
-  SOULS
-  DAMAGE
-  RESISTANCE
-  LUCKYBLOCKS
-}
-
-enum OutpostStatus {
-  AVAILABLE
-  CAPTURING
-  CAPTURED
-  COOLDOWN
-}
-
-enum LogCategory {
-  COMMAND
-  ADMIN
-  OWNER
-  AUCTION
-  EVENT
-  KOTH
-  STRONGHOLD
-  OUTPOST
-  CHAT_BRIDGE
-  MINEFLAYER
-  SYSTEM
-  API
-  UPDATE_PUBLICATION
-}
-
-enum AlertType {
-  AUCTION_PUBLIC
-  AUCTION_PERSONAL
-  EVENT
-  KOTH
-  STRONGHOLD
-  OUTPOST
-}
-
-// ---- Models ----
 
 model GuildConfig {
   id        String   @id @default(cuid())
@@ -125,6 +25,14 @@ model GuildConfig {
   chatBridgeChannelId     String?
   updatesChannelId        String?
 
+  // Specific event channel overrides
+  floralFortuneChannelId  String?
+  envoyDropsChannelId     String?
+  bloodLustChannelId      String?
+  goldRushChannelId       String?
+  hardPointChannelId      String?
+  kotlChannelId           String?
+
   // Role configurations
   floralFortuneRoleId     String?
   envoyDropsRoleId        String?
@@ -134,6 +42,7 @@ model GuildConfig {
   kotlRoleId              String?
   kothRoleId              String?
   strongholdRoleId        String?
+  updatesRoleId           String?
 
   // Feature toggles
   auctionFeedEnabled      Boolean  @default(false)
@@ -142,6 +51,8 @@ model GuildConfig {
   strongholdNotificationsEnabled Boolean @default(false)
   outpostMonitoringEnabled Boolean  @default(false)
   chatBridgeEnabled       Boolean  @default(false)
+  chatBridgeStyle         String   @default("ANSI")
+  updatesNotificationsEnabled Boolean @default(true)
 
   // Outpost message IDs for edit-in-place
   outpostMessageId        String?
@@ -209,8 +120,8 @@ model PlayerSnapshot {
   arrowsShot      Int?
   arrowsHit       Int?
 
-  // Raw JSON for any additional fields
-  rawData         Json?
+  // Raw JSON
+  rawData         String?
 
   snapshotAt DateTime @default(now())
 
@@ -224,7 +135,7 @@ model PlayerSnapshot {
 model NotificationPreference {
   id        String   @id @default(cuid())
   userId    String
-  alertType AlertType
+  alertType String
   enabled   Boolean  @default(true)
 
   createdAt DateTime @default(now())
@@ -237,11 +148,12 @@ model NotificationPreference {
 }
 
 model AuctionWatch {
-  id        String             @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
   itemName  String
   maxPrice  Float?
-  status    AuctionWatchStatus @default(ACTIVE)
+  currency  String   @default("ANY")
+  status    String   @default("ACTIVE")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -250,22 +162,23 @@ model AuctionWatch {
 
   @@index([userId])
   @@index([status])
+  @@index([currency])
   @@index([itemName])
 }
 
 model AuctionListing {
-  id              String               @id @default(cuid())
-  externalId      String               @unique
+  id              String   @id @default(cuid())
+  externalId      String   @unique
   itemName        String
-  quantity        Int                  @default(1)
+  quantity        Int      @default(1)
   seller          String?
   startingPrice   Float?
   currentPrice    Float?
   buyoutPrice     Float?
+  currency        String   @default("MONEY")
   expiresAt       DateTime?
-  status          AuctionListingStatus @default(ACTIVE)
+  status          String   @default("ACTIVE")
 
-  // Whether we've already sent the public feed notification
   publicNotified  Boolean  @default(false)
 
   detectedAt DateTime @default(now())
@@ -274,23 +187,23 @@ model AuctionListing {
 
   @@index([itemName])
   @@index([status])
+  @@index([currency])
   @@index([detectedAt])
   @@index([externalId])
 }
 
 model EventRecord {
-  id          String      @id @default(cuid())
-  eventType   EventType
-  status      EventStatus
-  detectedAt  DateTime    @default(now())
+  id          String   @id @default(cuid())
+  eventType   String
+  status      String
+  detectedAt  DateTime @default(now())
   startedAt   DateTime?
   endedAt     DateTime?
 
-  // Notification tracking
   notified    Boolean  @default(false)
   messageId   String?
 
-  rawData     Json?
+  rawData     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -307,7 +220,7 @@ model ProcessedFight {
   loser       String?
   gameMode    String?
 
-  rawData     Json?
+  rawData     String?
 
   processedAt DateTime @default(now())
   createdAt   DateTime @default(now())
@@ -319,14 +232,14 @@ model ProcessedFight {
 }
 
 model AlertHistory {
-  id          String    @id @default(cuid())
-  alertType   AlertType
+  id          String   @id @default(cuid())
+  alertType   String
   recipientId String?
   guildId     String?
   channelId   String?
   messageId   String?
   content     String?
-  success     Boolean   @default(true)
+  success     Boolean  @default(true)
   error       String?
 
   sentAt    DateTime @default(now())
@@ -340,7 +253,7 @@ model AlertHistory {
 model ApiCache {
   id        String   @id @default(cuid())
   key       String   @unique
-  data      Json
+  data      String
   expiresAt DateTime
 
   createdAt DateTime @default(now())
@@ -356,7 +269,7 @@ model AdminAuditLog {
   userId    String
   action    String
   target    String?
-  details   Json?
+  details   String?
   ipAddress String?
 
   createdAt DateTime @default(now())
@@ -368,11 +281,12 @@ model AdminAuditLog {
 }
 
 model LogConfiguration {
-  id          String      @id @default(cuid())
+  id          String   @id @default(cuid())
   guildId     String
-  category    LogCategory
+  category    String
   channelId   String?
-  enabled     Boolean     @default(true)
+  enabled     Boolean  @default(true)
+  level       String   @default("INFO")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -384,15 +298,15 @@ model LogConfiguration {
 }
 
 model OutpostRecord {
-  id              String        @id @default(cuid())
-  outpostName     OutpostName   @unique
-  status          OutpostStatus @default(AVAILABLE)
+  id              String   @id @default(cuid())
+  outpostName     String   @unique
+  status          String   @default("AVAILABLE")
   controllingTeam String?
   owner           String?
   capturingPlayer String?
   captureProgress Float?
   cooldownEndsAt  DateTime?
-  lastCheckedAt   DateTime      @default(now())
+  lastCheckedAt   DateTime @default(now())
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -445,7 +359,6 @@ model ChatBridgeConfig {
   channelId String?
   enabled   Boolean  @default(false)
 
-  // Filter settings
   filterPrivateMessages Boolean @default(true)
   filterPartyChat       Boolean @default(true)
   filterGuildChat       Boolean @default(true)
@@ -458,9 +371,10 @@ model ChatBridgeConfig {
 }
 
 model PublicCommandSettings {
-  id        String   @id @default(cuid())
-  guildId   String   @unique
-  enabled   Boolean  @default(true)
+  id               String   @id @default(cuid())
+  guildId          String   @unique
+  enabled          Boolean  @default(true)
+  disabledCommands String   @default("[]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

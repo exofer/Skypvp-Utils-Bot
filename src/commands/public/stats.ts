@@ -50,6 +50,7 @@ export const statsCommand: CommandModule = {
         };
       };
 
+      const balance = getStat('Balance');
       const kills = getStat('Kills');
       const deaths = getStat('Deaths');
       const killVal = parseFloat(kills.val.replace(/,/g, '')) || 0;
@@ -64,6 +65,7 @@ export const statsCommand: CommandModule = {
       const arrowsHit = getStat('Arrows hit');
 
       embed.addFields([
+        { name: '💵 Balance', value: `$${balance.val} (${balance.place})`, inline: true },
         { name: '⚔️ Kills', value: `${kills.val} (${kills.place})`, inline: true },
         { name: '☠️ Deaths', value: `${deaths.val} (${deaths.place})`, inline: true },
         { name: '📊 K/D Ratio', value: `${kdr}`, inline: true },

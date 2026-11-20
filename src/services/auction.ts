@@ -36,6 +36,7 @@ export class AuctionService {
             startingPrice: item.startingPrice,
             currentPrice: item.currentPrice,
             buyoutPrice: item.buyoutPrice,
+            currency: item.currency || 'MONEY',
           },
         });
 
@@ -65,22 +66,30 @@ export class AuctionService {
       },
     });
 
+    const isGold = listing.currency === 'GOLD';
+    const priceText = isGold
+      ? `🪙 **${formatNumber(listing.currentPrice)}** Gold`
+      : `💵 **$${formatNumber(listing.currentPrice)}**`;
+
     const embed = infoEmbed(
-      '🏷️ New SkyPvP Auction Listing',
+      isGold ? '🪙 New SkyPvP Gold Auction Listing' : '🏷️ New SkyPvP Auction Listing',
       `**${listing.itemName}** has been listed on the SkyPvP Auction House!`
     );
-    embed.setColor(COLORS.AUCTION);
+    embed.setColor(isGold ? 0xffaa00 : COLORS.AUCTION);
 
     embed.addFields([
       { name: '📦 Item', value: `${listing.itemName} (x${listing.quantity})`, inline: true },
       { name: '👤 Seller', value: `\`${listing.seller || 'Unknown'}\``, inline: true },
-      { name: '💰 Price', value: `$${formatNumber(listing.currentPrice)}`, inline: true },
+      { name: isGold ? '🪙 Price (Gold)' : '💰 Price', value: priceText, inline: true },
     ]);
 
     if (listing.buyoutPrice) {
+      const buyoutText = isGold
+        ? `🪙 **${formatNumber(listing.buyoutPrice)}** Gold`
+        : `💵 **$${formatNumber(listing.buyoutPrice)}**`;
       embed.addFields({
-        name: '⚡ Buyout Price',
-        value: `$${formatNumber(listing.buyoutPrice)}`,
+        name: isGold ? '⚡ Buyout (Gold)' : '⚡ Buyout Price',
+        value: buyoutText,
         inline: true,
       });
     }
@@ -117,6 +126,14 @@ export class AuctionService {
         continue;
       }
 
+      // Check currency match
+      if (watch.currency && watch.currency !== 'ANY') {
+        const listingCurrency = listing.currency || 'MONEY';
+        if (watch.currency.toUpperCase() !== listingCurrency.toUpperCase()) {
+          continue;
+        }
+      }
+
       // Check item name match (case-insensitive substring)
       const nameMatch = listing.itemName.toLowerCase().includes(watch.itemName.toLowerCase());
       if (!nameMatch) continue;
@@ -136,18 +153,31 @@ export class AuctionService {
       const user = await client.users.fetch(discordId);
       if (!user) return;
 
+      const isGold = listing.currency === 'GOLD';
+      const listedPriceStr = isGold
+        ? `🪙 ${formatNumber(listing.currentPrice)} Gold`
+        : `$${formatNumber(listing.currentPrice)}`;
+
+      let maxPriceStr = 'None';
+      if (watch.maxPrice) {
+        const isWatchGold = watch.currency === 'GOLD' || (watch.currency === 'ANY' && isGold);
+        maxPriceStr = isWatchGold
+          ? `🪙 ${formatNumber(watch.maxPrice)} Gold`
+          : `$${formatNumber(watch.maxPrice)}`;
+      }
+
       const embed = infoEmbed(
-        '🔔 Auction Watch Alert!',
+        isGold ? '🪙 Gold Auction Watch Alert!' : '🔔 Auction Watch Alert!',
         `An item matching your watch for **"${watch.itemName}"** was just detected on the SkyPvP Auction House!`
       );
-      embed.setColor(COLORS.AUCTION);
+      embed.setColor(isGold ? 0xffaa00 : COLORS.AUCTION);
 
       embed.addFields([
         { name: '📦 Item', value: `${listing.itemName} (x${listing.quantity})`, inline: true },
-        { name: '💰 Listed Price', value: `$${formatNumber(listing.currentPrice)}`, inline: true },
+        { name: isGold ? '🪙 Listed Price' : '💰 Listed Price', value: listedPriceStr, inline: true },
         {
           name: '🎯 Your Max Price',
-          value: watch.maxPrice ? `$${formatNumber(watch.maxPrice)}` : 'None',
+          value: maxPriceStr,
           inline: true,
         },
         { name: '👤 Seller', value: `\`${listing.seller || 'Unknown'}\``, inline: true },
@@ -163,7 +193,7 @@ export class AuctionService {
   /**
    * User watch management methods
    */
-  public async createWatch(userId: string, itemName: string, maxPrice?: number) {
+  public async createWatch(userId: string, itemName: string, maxPrice?: number, currency: string = 'ANY') {
     const user = await prisma.userProfile.upsert({
       where: { discordId: userId },
       update: {},
@@ -183,6 +213,7 @@ export class AuctionService {
         userId: user.id,
         itemName,
         maxPrice,
+        currency: currency.toUpperCase(),
       },
     });
   }

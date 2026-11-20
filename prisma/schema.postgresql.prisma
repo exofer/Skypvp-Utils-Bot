@@ -1,0 +1,478 @@
+// ============================================================
+// SkyPvP Utils — Prisma Schema
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---- Enums ----
+
+enum PermissionLevel {
+  PUBLIC
+  ADMIN
+  OWNER
+}
+
+enum AuctionWatchStatus {
+  ACTIVE
+  PAUSED
+  DELETED
+}
+
+enum AuctionListingStatus {
+  ACTIVE
+  SOLD
+  EXPIRED
+  CANCELLED
+}
+
+enum EventType {
+  FLORAL_FORTUNE
+  ENVOY_DROPS
+  BLOOD_LUST
+  GOLD_RUSH
+  HARD_POINT
+  KOTL
+}
+
+enum EventStatus {
+  STARTING
+  ACTIVE
+  ENDING
+  ENDED
+}
+
+enum KothLocation {
+  EAST
+  WEST
+}
+
+enum KothStatus {
+  INACTIVE
+  STARTING
+  ACTIVE
+  CAPTURING
+  CAPTURED
+}
+
+enum StrongholdStatus {
+  INACTIVE
+  STARTING
+  ACTIVE
+  CAPTURING
+  CAPTURED
+}
+
+enum OutpostName {
+  SOULS
+  DAMAGE
+  RESISTANCE
+  LUCKYBLOCKS
+}
+
+enum OutpostStatus {
+  AVAILABLE
+  CAPTURING
+  CAPTURED
+  COOLDOWN
+}
+
+enum LogCategory {
+  COMMAND
+  ADMIN
+  OWNER
+  AUCTION
+  EVENT
+  KOTH
+  STRONGHOLD
+  OUTPOST
+  CHAT_BRIDGE
+  MINEFLAYER
+  SYSTEM
+  API
+  UPDATE_PUBLICATION
+}
+
+enum AlertType {
+  AUCTION_PUBLIC
+  AUCTION_PERSONAL
+  EVENT
+  KOTH
+  STRONGHOLD
+  OUTPOST
+}
+
+// ---- Models ----
+
+model GuildConfig {
+  id        String   @id @default(cuid())
+  guildId   String   @unique
+  guildName String?
+
+  // Channel configurations
+  auctionFeedChannelId    String?
+  eventChannelId          String?
+  kothChannelId           String?
+  strongholdChannelId     String?
+  outpostChannelId        String?
+  chatBridgeChannelId     String?
+  updatesChannelId        String?
+
+  // Specific event channel overrides
+  floralFortuneChannelId  String?
+  envoyDropsChannelId     String?
+  bloodLustChannelId      String?
+  goldRushChannelId       String?
+  hardPointChannelId      String?
+  kotlChannelId           String?
+
+  // Role configurations
+  floralFortuneRoleId     String?
+  envoyDropsRoleId        String?
+  bloodLustRoleId         String?
+  goldRushRoleId          String?
+  hardPointRoleId         String?
+  kotlRoleId              String?
+  kothRoleId              String?
+  strongholdRoleId        String?
+
+  // Feature toggles
+  auctionFeedEnabled      Boolean  @default(false)
+  eventNotificationsEnabled Boolean @default(false)
+  kothNotificationsEnabled Boolean  @default(false)
+  strongholdNotificationsEnabled Boolean @default(false)
+  outpostMonitoringEnabled Boolean  @default(false)
+  chatBridgeEnabled       Boolean  @default(false)
+  chatBridgeStyle         String   @default("ANSI")
+
+  // Outpost message IDs for edit-in-place
+  outpostMessageId        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logConfigurations LogConfiguration[]
+
+  @@index([guildId])
+}
+
+model UserProfile {
+  id        String   @id @default(cuid())
+  discordId String   @unique
+  username  String?
+
+  // Personal alert settings
+  auctionAlertsEnabled Boolean @default(true)
+  dmAlertsEnabled      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trackedPlayers          TrackedPlayer[]
+  auctionWatches          AuctionWatch[]
+  notificationPreferences NotificationPreference[]
+
+  @@index([discordId])
+}
+
+model TrackedPlayer {
+  id        String   @id @default(cuid())
+  userId    String
+  playerName String
+  playerUuid String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      UserProfile     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshots PlayerSnapshot[]
+
+  @@unique([userId, playerName])
+  @@index([playerName])
+  @@index([userId])
+}
+
+model PlayerSnapshot {
+  id              String   @id @default(cuid())
+  trackedPlayerId String
+  playerName      String
+
+  // SkyPvP stats
+  kills           Int?
+  deaths          Int?
+  wins            Int?
+  losses          Int?
+  xp              BigInt?
+  highestStreak   Int?
+  bounty          Int?
+  assists         Int?
+  meleeDamageDealt  Float?
+  meleeDamageReceived Float?
+  arrowsShot      Int?
+  arrowsHit       Int?
+
+  // Raw JSON for any additional fields
+  rawData         Json?
+
+  snapshotAt DateTime @default(now())
+
+  trackedPlayer TrackedPlayer @relation(fields: [trackedPlayerId], references: [id], onDelete: Cascade)
+
+  @@index([trackedPlayerId])
+  @@index([snapshotAt])
+  @@index([playerName])
+}
+
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  alertType AlertType
+  enabled   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, alertType])
+  @@index([userId])
+}
+
+model AuctionWatch {
+  id        String             @id @default(cuid())
+  userId    String
+  itemName  String
+  maxPrice  Float?
+  status    AuctionWatchStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([itemName])
+}
+
+model AuctionListing {
+  id              String               @id @default(cuid())
+  externalId      String               @unique
+  itemName        String
+  quantity        Int                  @default(1)
+  seller          String?
+  startingPrice   Float?
+  currentPrice    Float?
+  buyoutPrice     Float?
+  expiresAt       DateTime?
+  status          AuctionListingStatus @default(ACTIVE)
+
+  // Whether we've already sent the public feed notification
+  publicNotified  Boolean  @default(false)
+
+  detectedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([itemName])
+  @@index([status])
+  @@index([detectedAt])
+  @@index([externalId])
+}
+
+model EventRecord {
+  id          String      @id @default(cuid())
+  eventType   EventType
+  status      EventStatus
+  detectedAt  DateTime    @default(now())
+  startedAt   DateTime?
+  endedAt     DateTime?
+
+  // Notification tracking
+  notified    Boolean  @default(false)
+  messageId   String?
+
+  rawData     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventType])
+  @@index([status])
+  @@index([detectedAt])
+}
+
+model ProcessedFight {
+  id          String   @id @default(cuid())
+  externalId  String   @unique
+  winner      String?
+  loser       String?
+  gameMode    String?
+
+  rawData     Json?
+
+  processedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([externalId])
+  @@index([winner])
+  @@index([loser])
+  @@index([processedAt])
+}
+
+model AlertHistory {
+  id          String    @id @default(cuid())
+  alertType   AlertType
+  recipientId String?
+  guildId     String?
+  channelId   String?
+  messageId   String?
+  content     String?
+  success     Boolean   @default(true)
+  error       String?
+
+  sentAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([alertType])
+  @@index([recipientId])
+  @@index([sentAt])
+}
+
+model ApiCache {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  data      Json
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+  @@index([expiresAt])
+}
+
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  guildId   String?
+  userId    String
+  action    String
+  target    String?
+  details   Json?
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([guildId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model LogConfiguration {
+  id          String      @id @default(cuid())
+  guildId     String
+  category    LogCategory
+  channelId   String?
+  enabled     Boolean     @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  guild GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@unique([guildId, category])
+  @@index([guildId])
+}
+
+model OutpostRecord {
+  id              String        @id @default(cuid())
+  outpostName     OutpostName   @unique
+  status          OutpostStatus @default(AVAILABLE)
+  controllingTeam String?
+  owner           String?
+  capturingPlayer String?
+  captureProgress Float?
+  cooldownEndsAt  DateTime?
+  lastCheckedAt   DateTime      @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([outpostName])
+  @@index([status])
+}
+
+model UpdateAnnouncement {
+  id            String   @id @default(cuid())
+  title         String
+  version       String?
+  description   String?
+  features      String?
+  improvements  String?
+  bugFixes      String?
+  notes         String?
+  publisherId   String
+  channelId     String
+  messageId     String?
+  published     Boolean  @default(false)
+
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([publisherId])
+  @@index([publishedAt])
+}
+
+model MineflayerAccountConfig {
+  id                String   @id @default(cuid())
+  guildId           String   @unique
+  encryptedUsername  String?
+  encryptedPassword String?
+  host              String   @default("play.pika-network.net")
+  port              Int      @default(25565)
+  autoReconnect     Boolean  @default(true)
+  enabled           Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([guildId])
+}
+
+model ChatBridgeConfig {
+  id        String   @id @default(cuid())
+  guildId   String   @unique
+  channelId String?
+  enabled   Boolean  @default(false)
+
+  // Filter settings
+  filterPrivateMessages Boolean @default(true)
+  filterPartyChat       Boolean @default(true)
+  filterGuildChat       Boolean @default(true)
+  filterStaffMessages   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([guildId])
+}
+
+model PublicCommandSettings {
+  id        String   @id @default(cuid())
+  guildId   String   @unique
+  enabled   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([guildId])
+}

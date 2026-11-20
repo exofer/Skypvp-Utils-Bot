@@ -15,6 +15,7 @@ export const leaderboardCommand: CommandModule = {
         .setDescription('Leaderboard metric')
         .setRequired(false)
         .addChoices(
+          { name: 'Balance / Baltop', value: 'balance' },
           { name: 'Kills', value: 'kills' },
           { name: 'Deaths', value: 'deaths' },
           { name: 'Wins', value: 'wins' },
@@ -44,9 +45,13 @@ export const leaderboardCommand: CommandModule = {
       const data = await getLeaderboard(stat, interval, 0, 10);
       const entries = data.entries || [];
 
+      const isBalance = stat === 'balance' || stat === 'baltop' || stat === 'baltops';
+      const isBounty = stat === 'bounty';
+      const titleName = isBalance ? 'BALTOP (Balance)' : stat.toUpperCase();
+
       const embed = infoEmbed(
-        `SkyPvP Leaderboard: ${stat.toUpperCase()}`,
-        `Top 10 players for **${stat}** (${interval.toUpperCase()}) on PikaNetwork SkyPvP.`
+        `🏆 SkyPvP Leaderboard: ${titleName}`,
+        `Top 10 players for **${isBalance ? 'in-game balance' : stat}** (${interval.toUpperCase()}) on PikaNetwork SkyPvP.`
       );
 
       if (entries.length === 0) {
@@ -55,7 +60,8 @@ export const leaderboardCommand: CommandModule = {
         const lines = entries.map((e, idx) => {
           const rank = e.place || idx + 1;
           const name = e.user?.username || e.id || 'Unknown';
-          const val = formatNumber(e.value);
+          const prefix = isBalance || isBounty ? '$' : '';
+          const val = `${prefix}${formatNumber(e.value)}`;
           const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `\`#${rank}\``;
           return `${medal} **${name}** — \`${val}\``;
         });

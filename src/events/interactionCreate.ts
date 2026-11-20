@@ -4,13 +4,15 @@ import {
   type ButtonInteraction,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
+  type GuildMember,
 } from 'discord.js';
 import { commands, buttonHandlers, modalHandlers, selectMenuHandlers } from '../bot.js';
-import { checkPermission, isOwner } from '../permissions/guard.js';
+import { checkPermission, isOwner, isAdmin } from '../permissions/guard.js';
 import { PermissionLevel } from '../permissions/levels.js';
 import { createLogger } from '../utils/logger.js';
 import { errorEmbed, unauthorizedEmbed, publicCommandsDisabledEmbed } from '../utils/embeds.js';
 import { prisma } from '../db/prisma.js';
+import { systemService } from '../services/system.js';
 
 const log = createLogger('interactionCreate');
 
@@ -46,7 +48,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (!permCheck.allowed) {
     if (command.permission === PermissionLevel.PUBLIC) {
       await interaction.reply({
-        embeds: [publicCommandsDisabledEmbed()],
+        embeds: [publicCommandsDisabledEmbed(permCheck.reason)],
         ephemeral: true,
       });
     } else {
@@ -66,12 +68,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           guildId: interaction.guildId,
           userId: interaction.user.id,
           action: `CMD:${interaction.commandName}`,
-          details: JSON.parse(
-            JSON.stringify({
-              options: interaction.options.data,
-              subcommand: interaction.options.getSubcommand(false),
-            })
-          ),
+          details: JSON.stringify({
+            options: interaction.options.data,
+            subcommand: interaction.options.getSubcommand(false),
+          }),
         },
       });
     } catch (e: any) {
@@ -102,12 +102,38 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   }
 }
 
+function checkComponentAccess(userId: string, member: GuildMember | null, permission: PermissionLevel): { allowed: boolean; reason?: string } {
+  // 1. Blacklist check
+  if (!isOwner(userId) && systemService.isBlacklisted(userId)) {
+    return { allowed: false, reason: 'You have been blacklisted from using this bot.' };
+  }
+
+  // 2. Global maintenance mode check
+  if (!isOwner(userId) && systemService.isMaintenance()) {
+    return { allowed: false, reason: 'The bot is currently in maintenance mode. Please try again later.' };
+  }
+
+  // 3. Permission level check
+  if (permission === PermissionLevel.OWNER) {
+    if (!isOwner(userId)) {
+      return { allowed: false, reason: 'This interaction is restricted to the bot owner.' };
+    }
+  } else if (permission === PermissionLevel.ADMIN) {
+    if (!isOwner(userId) && (!member || !isAdmin(member))) {
+      return { allowed: false, reason: 'This interaction requires the Administrator permission in this server.' };
+    }
+  }
+
+  return { allowed: true };
+}
+
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
   for (const handler of buttonHandlers) {
     if (interaction.customId.startsWith(handler.customId)) {
-      if (handler.permission === PermissionLevel.OWNER && !isOwner(interaction.user.id)) {
+      const access = checkComponentAccess(interaction.user.id, interaction.member as GuildMember | null, handler.permission);
+      if (!access.allowed) {
         await interaction.reply({
-          embeds: [unauthorizedEmbed('Only the bot owner can click this button.')],
+          embeds: [unauthorizedEmbed(access.reason || 'You do not have permission to interact with this button.')],
           ephemeral: true,
         });
         return;
@@ -121,9 +147,10 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   for (const handler of modalHandlers) {
     if (interaction.customId.startsWith(handler.customId)) {
-      if (handler.permission === PermissionLevel.OWNER && !isOwner(interaction.user.id)) {
+      const access = checkComponentAccess(interaction.user.id, interaction.member as GuildMember | null, handler.permission);
+      if (!access.allowed) {
         await interaction.reply({
-          embeds: [unauthorizedEmbed('Only the bot owner can submit this modal.')],
+          embeds: [unauthorizedEmbed(access.reason || 'You do not have permission to submit this modal.')],
           ephemeral: true,
         });
         return;
@@ -137,9 +164,10 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 async function handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<void> {
   for (const handler of selectMenuHandlers) {
     if (interaction.customId.startsWith(handler.customId)) {
-      if (handler.permission === PermissionLevel.OWNER && !isOwner(interaction.user.id)) {
+      const access = checkComponentAccess(interaction.user.id, interaction.member as GuildMember | null, handler.permission);
+      if (!access.allowed) {
         await interaction.reply({
-          embeds: [unauthorizedEmbed('Only the bot owner can use this menu.')],
+          embeds: [unauthorizedEmbed(access.reason || 'You do not have permission to use this menu.')],
           ephemeral: true,
         });
         return;

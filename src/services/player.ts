@@ -106,7 +106,7 @@ export class PlayerService {
           bounty,
           arrowsShot,
           arrowsHit,
-          rawData: stats as any,
+          rawData: JSON.stringify(stats),
         },
       });
 

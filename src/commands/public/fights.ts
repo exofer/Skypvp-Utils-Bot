@@ -3,7 +3,7 @@ import { PermissionLevel } from '../../permissions/levels.js';
 import type { CommandModule } from '../../types/index.js';
 import { getPlayerFights } from '../../api/endpoints.js';
 import { infoEmbed, errorEmbed } from '../../utils/embeds.js';
-import { stripColorCodes } from '../../utils/minecraft.js';
+import { formatWeaponName, formatNumber } from '../../utils/minecraft.js';
 
 export const fightsCommand: CommandModule = {
   data: new SlashCommandBuilder()
@@ -18,27 +18,73 @@ export const fightsCommand: CommandModule = {
     await interaction.deferReply();
 
     try {
-      const data = await getPlayerFights(username, 5);
-      const fights = Array.isArray(data?.fights) ? data.fights : [];
+      const data = await getPlayerFights(username, 10);
+
+      // Support both data.recent (current Pika API format) and data.fights
+      let fightEntries: any[] = [];
+      if (Array.isArray(data?.recent)) {
+        fightEntries = data.recent.map((r: any) => ({
+          fight: r.fight || r,
+          won: r.won ?? ((r.fight?.winner?.username || r.winner?.username)?.toLowerCase() === username.toLowerCase()),
+        }));
+      } else if (Array.isArray(data?.fights)) {
+        fightEntries = data.fights.map((f: any) => ({
+          fight: f,
+          won: (f.winner?.username || f.killer?.username)?.toLowerCase() === username.toLowerCase(),
+        }));
+      } else if (Array.isArray(data)) {
+        fightEntries = data.map((f: any) => ({
+          fight: f.fight || f,
+          won: f.won ?? ((f.winner?.username || f.killer?.username)?.toLowerCase() === username.toLowerCase()),
+        }));
+      }
 
       const embed = infoEmbed(
         `Recent Fights: ${username}`,
         `Latest recorded SkyPvP encounters for **${username}**.`
       );
 
-      if (fights.length === 0) {
+      // Add combat stats summary if available
+      if (data && typeof data === 'object' && ('kills' in data || 'streak' in data)) {
+        const kills = formatNumber(data.kills ?? 0);
+        const deaths = formatNumber(data.deaths ?? 0);
+        const streak = formatNumber(data.streak ?? 0);
+        const bestStreak = formatNumber(data.bestStreak ?? 0);
+        embed.addFields({
+          name: 'Combat Summary (Last 30 Days)',
+          value: `⚔️ **Kills**: ${kills} | ☠️ **Deaths**: ${deaths} | 🔥 **Streak**: ${streak} (Best: ${bestStreak})`,
+          inline: false,
+        });
+      }
+
+      if (fightEntries.length === 0) {
         embed.setDescription(`No recent SkyPvP fights recorded for **${username}**.`);
       } else {
-        for (const fight of fights.slice(0, 5)) {
-          const isKiller = fight.killer?.username?.toLowerCase() === username.toLowerCase();
-          const opponent = isKiller ? fight.victim?.username : fight.killer?.username;
-          const outcome = isKiller ? '🟢 VICTORY' : '🔴 DEFEAT';
-          const weapon = fight.killer?.weapon ? ` (${stripColorCodes(fight.killer.weapon)})` : '';
-          const time = fight.time ? `<t:${Math.floor(fight.time / 1000)}:R>` : 'Recently';
+        for (const entry of fightEntries.slice(0, 5)) {
+          const f = entry.fight;
+          const winnerName = f.winner?.username || f.killer?.username;
+          const loserName = f.loser?.username || f.victim?.username;
+          const isWinner = entry.won ?? (winnerName?.toLowerCase() === username.toLowerCase());
+
+          const opponent = isWinner ? (loserName || 'Unknown') : (winnerName || 'Unknown');
+          const outcome = isWinner ? '🟢 VICTORY' : '🔴 DEFEAT';
+
+          let weaponText = '';
+          if (f.cause === 'VOID') {
+            weaponText = 'Void';
+          } else {
+            const wName = formatWeaponName(
+              f.weapon,
+              isWinner ? (f.winner?.weapon || f.killer?.weapon) : (f.loser?.weapon || f.victim?.weapon)
+            );
+            weaponText = wName || 'None';
+          }
+
+          const time = f.time ? `<t:${Math.floor(f.time / 1000)}:R>` : 'Recently';
 
           embed.addFields({
-            name: `${outcome} vs ${opponent || 'Unknown'}`,
-            value: `**Weapon**: ${weapon || 'None'}\n**Time**: ${time}`,
+            name: `${outcome} vs ${opponent}`,
+            value: `**Cause / Weapon**: ${weaponText}\n**Time**: ${time}`,
             inline: false,
           });
         }
