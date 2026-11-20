@@ -16,10 +16,10 @@ npm-debug.log*
 
 # Database & cache data
 *.db
+!prisma/dev.db
 *.db-journal
 dump.rdb
 pgdata/
-dev.db
 .idea/
 .vscode/
 *.suo
