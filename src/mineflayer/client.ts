@@ -52,11 +52,13 @@ export class MineflayerManager extends EventEmitter {
     const sbItems: string[] = [];
     try {
       if (this.bot.scoreboards) {
-        for (const sb of Object.values(this.bot.scoreboards)) {
-          if (sb.title) sbItems.push(sb.title);
-          if (sb.items) {
-            for (const item of Object.values(sb.items)) {
-              if (item.displayName) sbItems.push(item.displayName.toString());
+        for (const sb of Object.values(this.bot.scoreboards as Record<string, any>)) {
+          const s = sb as any;
+          if (s?.title) sbItems.push(s.title);
+          if (s?.items) {
+            for (const item of Object.values(s.items as Record<string, any>)) {
+              const it = item as any;
+              if (it?.displayName) sbItems.push(it.displayName.toString());
             }
           }
         }
@@ -120,7 +122,7 @@ export class MineflayerManager extends EventEmitter {
 
           // Check inventory items
           try {
-            const items = this.bot?.inventory.items().map((i) => ({
+            const items = (this.bot as any)?.inventory.items().map((i: any) => ({
               slot: i.slot,
               name: i.name,
               displayName: i.displayName,
@@ -153,11 +155,11 @@ export class MineflayerManager extends EventEmitter {
           resolve(true);
         });
 
-        this.bot.on('scoreboardTitleChanged', (sb) => {
-          log.info({ title: sb.title }, 'Scoreboard title updated');
+        this.bot.on('scoreboardTitleChanged', (sb: any) => {
+          log.info({ title: sb?.title }, 'Scoreboard title updated');
         });
 
-        this.bot.on('message', (jsonMsg, position) => {
+        this.bot.on('message', (jsonMsg: any, position: any) => {
           if (position === 'game_info') {
             return; // Skip action bar messages
           }
@@ -193,12 +195,12 @@ export class MineflayerManager extends EventEmitter {
           this.emit('chatMessage', raw, jsonMsg);
         });
 
-        this.bot.on('windowOpen', (window) => {
-          log.info({ title: window.title, slots: window.slots?.length }, 'GUI Window opened in Minecraft');
+        this.bot.on('windowOpen', (window: any) => {
+          log.info({ title: window?.title, slots: window?.slots?.length }, 'GUI Window opened in Minecraft');
           this.emit('windowOpen', window);
         });
 
-        this.bot.on('kicked', (reason) => {
+        this.bot.on('kicked', (reason: any) => {
           const kickStr = typeof reason === 'string' ? reason : JSON.stringify(reason);
           log.warn({ reason: kickStr }, 'Mineflayer bot was kicked from server');
           this.handleDisconnect(`Kicked: ${kickStr}`);
@@ -211,10 +213,10 @@ export class MineflayerManager extends EventEmitter {
           resolve(false);
         });
 
-        this.bot.on('error', (err) => {
-          log.error({ err: err.message }, 'Mineflayer bot error');
-          this.lastError = err.message;
-          this.handleDisconnect(err.message);
+        this.bot.on('error', (err: any) => {
+          log.error({ err: err?.message }, 'Mineflayer bot error');
+          this.lastError = err?.message;
+          this.handleDisconnect(err?.message);
           resolve(false);
         });
       } catch (err: any) {

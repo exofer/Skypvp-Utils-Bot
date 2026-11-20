@@ -161,7 +161,7 @@ export class PikaApiClient {
           // Still fallback to raw json to prevent crash on non-breaking schema additions
           validatedData = json as T;
         } else {
-          validatedData = parseResult.data;
+          validatedData = parseResult.data as T;
         }
       }
 

@@ -30,14 +30,14 @@ const envSchema = z.object({
   // Mineflayer
   MINEFLAYER_ENABLED: z
     .string()
-    .transform((v) => v === 'true')
-    .default('false'),
+    .default('false')
+    .transform((v) => v === 'true'),
   MINEFLAYER_HOST: z.string().default('play.pika-network.net'),
   MINEFLAYER_PORT: z
     .string()
+    .default('25565')
     .transform((v) => parseInt(v, 10))
-    .pipe(z.number().int().positive())
-    .default('25565'),
+    .pipe(z.number().int().positive()),
 
   // Application
   NODE_ENV: z
