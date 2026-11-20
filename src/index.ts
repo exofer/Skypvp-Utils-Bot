@@ -36,7 +36,6 @@ import { compareCommand } from './commands/public/compare.js';
 import { leaderboardCommand } from './commands/public/leaderboard.js';
 import { fightsCommand } from './commands/public/fights.js';
 import { killfeedCommand } from './commands/public/killfeed.js';
-import { trackCommand } from './commands/public/track.js';
 import { auctionCommand } from './commands/public/auction.js';
 import { eventsCommand } from './commands/public/events.js';
 import { chatCommand } from './commands/public/chat.js';
@@ -99,7 +98,6 @@ async function bootstrap() {
     leaderboardCommand,
     fightsCommand,
     killfeedCommand,
-    trackCommand,
     auctionCommand,
     eventsCommand,
     chatCommand,

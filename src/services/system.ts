@@ -23,7 +23,6 @@ export const PUBLIC_COMMAND_NAMES = [
   'profile',
   'stats',
   'team',
-  'track',
 ] as const;
 
 export type PublicCommandName = (typeof PUBLIC_COMMAND_NAMES)[number];

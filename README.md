@@ -16,7 +16,6 @@ SkyPvP Utils is an advanced telemetry, monitoring, and statistics bot tailored f
   - Network-wide top leaderboards (`/leaderboard`).
   - Match history and recent PvP fights (`/fights <username>`).
   - Real-time network combat killfeed (`/killfeed`).
-  - Persistent stat tracking and progression delta snapshots (`/track <add|remove|list|info>`).
 - **Auction House Monitoring**:
   - Modular `AuctionProvider` architecture observing live `/ah` listings.
   - Public automated auction announcements feed (`/auctionfeed`).
@@ -70,7 +69,6 @@ SkyPvP Utils is an advanced telemetry, monitoring, and statistics bot tailored f
 | `/leaderboard` | `[stat] [interval]` | Server leaderboards (kills, balance, deaths, etc.) |
 | `/fights` | `<username>` | Recent PvP fights and weapon usage |
 | `/killfeed` | | Live network SkyPvP kill activity |
-| `/track` | `add, remove, list, info` | Track player stat progression and snapshots |
 | `/auction` | `search, watch, watches, watchlist, edit, pause, resume, delete, alerts` | SkyPvP Auction House search and DM alerts |
 | `/team` | `tops, top, info` | Clan/Team leaderboards and detailed roster stats |
 | `/events` | | Active in-game events and tournaments |

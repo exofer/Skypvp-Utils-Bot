@@ -29,8 +29,7 @@ export const helpCommand: CommandModule = {
           '`/compare <p1> <p2>` — Head-to-head stat comparison\n' +
           '`/leaderboard [stat] [interval]` — Top ranked players (kills, balance, etc.)\n' +
           '`/fights <username>` — Recent PvP fights and weapon usage\n' +
-          '`/killfeed` — Network-wide live SkyPvP kill activity\n' +
-          '`/track <add|remove|list|info>` — Player snapshot tracking',
+          '`/killfeed` — Network-wide live SkyPvP kill activity',
         inline: false,
       },
       {

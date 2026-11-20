@@ -27,7 +27,6 @@ export const COMMAND_CHOICES = [
   { name: '/profile — Player Profile & History', value: 'profile' },
   { name: '/stats — Detailed Player SkyPvP Stats', value: 'stats' },
   { name: '/team — SkyPvP Team Info & Tops', value: 'team' },
-  { name: '/track — Player Stat Tracking', value: 'track' },
 ];
 
 export const SCOPE_CHOICES = [
@@ -67,7 +66,7 @@ export function buildCommandAvailabilityEmbed(
     .map((c) => `• \`/${c}\`: ${getStatus(c)}`)
     .join('\n');
 
-  const utility = ['help', 'ping', 'track']
+  const utility = ['help', 'ping']
     .map((c) => `• \`/${c}\`: ${getStatus(c)}`)
     .join('\n');
 

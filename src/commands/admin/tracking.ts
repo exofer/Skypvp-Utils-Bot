@@ -42,9 +42,7 @@ export const trackingCommand: CommandModule = {
           name: '⚙️ System Configuration',
           value:
             `• **Snapshot Frequency**: Periodic background polling (every 5 minutes)\n` +
-            `• **Per-User Limit**: \`10 players\` per user\n` +
-            `• **Data Source**: PikaNetwork Stats API (X-Api-Key authenticated)\n` +
-            `• **Commands**: \`/track add\`, \`/track remove\`, \`/track list\`, \`/track info\``,
+            `• **Data Source**: PikaNetwork Stats API (X-Api-Key authenticated)`,
           inline: false,
         },
       ]);
