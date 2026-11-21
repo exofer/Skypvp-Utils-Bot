@@ -81,7 +81,20 @@ async function runDiagnostic() {
   console.log(`[4/5] Testing Minecraft Server List Ping (SLP handshake)...`);
   await new Promise<void>((resolve) => {
     const start = Date.now();
-    mcProtocol.ping({ host, port, version: '1.20.4' }, (err, result) => {
+    let resolved = false;
+    const done = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+    const timer = setTimeout(() => {
+      console.log(`  ⏱️  SLP Ping timed out after 5000ms\n`);
+      done();
+    }, 5000);
+
+    mcProtocol.ping({ host, port, closeTimeout: 4000 }, (err, result) => {
+      clearTimeout(timer);
       const elapsed = Date.now() - start;
       if (err) {
         console.log(`  ❌ SLP Ping failed in ${elapsed}ms: ${err.message}\n`);
@@ -92,7 +105,7 @@ async function runDiagnostic() {
         console.log(`     - Server Version: ${ver}`);
         console.log(`     - Online Players: ${players}\n`);
       }
-      resolve();
+      done();
     });
   });
 

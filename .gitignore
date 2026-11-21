@@ -13,6 +13,7 @@ dist/
 logs/
 *.log
 npm-debug.log*
+skyutils-logs*.txt
 
 # Database & cache data
 *.db
