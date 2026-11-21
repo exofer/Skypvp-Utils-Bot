@@ -289,12 +289,28 @@ export class MineflayerManager extends EventEmitter {
           });
 
           client.on('connect', () => {
-            this.phase = 'handshaking';
+            if (this.phase === 'tcp_connecting' || this.phase === 'idle') {
+              this.phase = 'handshaking';
+            }
             log.info(
               { host: env.MINEFLAYER_HOST, port: env.MINEFLAYER_PORT },
               'TCP socket connection established with Minecraft server'
             );
           });
+
+          // Safeguard against Mineflayer inventory transaction packet edge cases
+          const originalEmit = client.emit.bind(client);
+          client.emit = function (event: string, ...args: any[]) {
+            if (event === 'transaction') {
+              try {
+                return originalEmit(event, ...args);
+              } catch (err: any) {
+                log.debug({ err: err?.message }, 'Handled Mineflayer confirmTransaction packet edge case safely');
+                return false;
+              }
+            }
+            return originalEmit(event, ...args);
+          };
 
           client.on('state', (newState: string, oldState: string) => {
             this.phase = newState as ConnectionPhase;
