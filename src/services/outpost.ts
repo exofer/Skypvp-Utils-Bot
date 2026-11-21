@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { client } from '../bot.js';
 import { outpostProvider, type OutpostInfo, type OutpostType } from '../providers/outpost.js';
+import { mineflayerManager } from '../mineflayer/client.js';
 import { infoEmbed } from '../utils/embeds.js';
 import { COLORS } from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
@@ -24,10 +25,29 @@ export class OutpostService {
       },
     });
 
-    // 1. Fetch fresh states from the Warzone Events GUI via Mineflayer
+    // 1. Fetch current states (scrapes GUI if Mineflayer connected; otherwise preserves last valid state)
     const outposts = await outpostProvider.fetchOutposts(diagnosticMode);
+    const isFresh = outpostProvider.hasFreshData();
 
-    // 2. Detect meaningful state changes
+    // 2. Hydrate lastStoredStates from DB if first run to prevent false initial transitions
+    if (this.lastStoredStates.size === 0) {
+      try {
+        const existing = await prisma.outpostRecord.findMany();
+        for (const rec of existing) {
+          this.lastStoredStates.set(rec.outpostName as OutpostType, {
+            status: rec.status,
+            team: rec.controllingTeam ?? undefined,
+            capper: rec.capturingPlayer ?? undefined,
+            progress: rec.captureProgress ?? undefined,
+            cooldown: undefined,
+          });
+        }
+      } catch (err: any) {
+        log.debug({ err: err?.message }, 'Failed to preload last stored outpost states');
+      }
+    }
+
+    // 3. Detect meaningful state changes
     let hasAnyStateChanged = false;
     for (const op of outposts) {
       const prev = this.lastStoredStates.get(op.type);
@@ -63,32 +83,35 @@ export class OutpostService {
       }
     }
 
-    // 3. Persist to DB
-    for (const op of outposts) {
-      try {
-        await prisma.outpostRecord.upsert({
-          where: { outpostName: op.type },
-          update: {
-            status: op.status,
-            controllingTeam: op.controllingTeam,
-            owner: op.owner,
-            capturingPlayer: op.capturingPlayer,
-            captureProgress: op.captureProgress,
-            cooldownEndsAt: op.cooldownEndsAt,
-            lastCheckedAt: new Date(),
-          },
-          create: {
-            outpostName: op.type,
-            status: op.status,
-            controllingTeam: op.controllingTeam,
-            owner: op.owner,
-            capturingPlayer: op.capturingPlayer,
-            captureProgress: op.captureProgress,
-            cooldownEndsAt: op.cooldownEndsAt,
-          },
-        });
-      } catch (err: any) {
-        log.warn({ outpost: op.name, err: err?.message }, 'Failed to persist outpost record in DB');
+    // 4. Persist to DB ONLY if fresh data was scraped from server or chat state changed.
+    // Do NOT overwrite existing DB records with AVAILABLE defaults when Mineflayer is disconnected.
+    if (isFresh || (hasAnyStateChanged && mineflayerManager.isConnected())) {
+      for (const op of outposts) {
+        try {
+          await prisma.outpostRecord.upsert({
+            where: { outpostName: op.type },
+            update: {
+              status: op.status,
+              controllingTeam: op.controllingTeam,
+              owner: op.owner,
+              capturingPlayer: op.capturingPlayer,
+              captureProgress: op.captureProgress,
+              cooldownEndsAt: op.cooldownEndsAt,
+              lastCheckedAt: new Date(),
+            },
+            create: {
+              outpostName: op.type,
+              status: op.status,
+              controllingTeam: op.controllingTeam,
+              owner: op.owner,
+              capturingPlayer: op.capturingPlayer,
+              captureProgress: op.captureProgress,
+              cooldownEndsAt: op.cooldownEndsAt,
+            },
+          });
+        } catch (err: any) {
+          log.warn({ outpost: op.name, err: err?.message }, 'Failed to persist outpost record in DB');
+        }
       }
     }
 

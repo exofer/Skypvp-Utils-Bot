@@ -4,6 +4,13 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('mineflayer-security');
 
+export interface CredentialValidationResult {
+  valid: boolean;
+  configured: boolean;
+  error?: string;
+  username?: string;
+}
+
 export class MineflayerSecurity {
   /**
    * Save encrypted credentials for a guild or global bot instance
@@ -31,6 +38,47 @@ export class MineflayerSecurity {
   }
 
   /**
+   * Validate whether credentials exist and can be successfully decrypted
+   * with the current ENCRYPTION_KEY in .env
+   */
+  public async validateCredentials(guildId: string): Promise<CredentialValidationResult> {
+    const config = await prisma.mineflayerAccountConfig.findUnique({
+      where: { guildId },
+    });
+
+    if (!config || !config.encryptedUsername) {
+      return {
+        valid: false,
+        configured: false,
+        error: 'No Minecraft bot credentials configured for this server. Use `/owneraccount configure`.',
+      };
+    }
+
+    try {
+      const username = decrypt(config.encryptedUsername);
+      if (config.encryptedPassword) {
+        decrypt(config.encryptedPassword);
+      }
+      return {
+        valid: true,
+        configured: true,
+        username,
+      };
+    } catch (err: any) {
+      log.error(
+        { guildId, err: err?.message },
+        'Failed to decrypt Mineflayer credentials. The ENCRYPTION_KEY in .env may have been modified.'
+      );
+      return {
+        valid: false,
+        configured: true,
+        error:
+          'Failed to decrypt credentials. The ENCRYPTION_KEY in .env was changed since credentials were saved. Please re-run `/owneraccount configure` with your credentials.',
+      };
+    }
+  }
+
+  /**
    * Retrieve and decrypt credentials
    */
   public async getCredentials(guildId: string): Promise<{ username: string; password?: string } | null> {
@@ -47,7 +95,7 @@ export class MineflayerSecurity {
       const password = config.encryptedPassword ? decrypt(config.encryptedPassword) : undefined;
       return { username, password };
     } catch (err: any) {
-      log.error({ err: err.message }, 'Failed to decrypt Mineflayer credentials');
+      log.error({ err: err?.message, guildId }, 'Failed to decrypt Mineflayer credentials');
       return null;
     }
   }

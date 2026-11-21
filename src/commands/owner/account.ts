@@ -4,6 +4,7 @@ import type { CommandModule } from '../../types/index.js';
 import { mineflayerManager } from '../../mineflayer/client.js';
 import { mineflayerSecurity } from '../../mineflayer/security.js';
 import { infoEmbed, successEmbed, errorEmbed } from '../../utils/embeds.js';
+import { env } from '../../config/env.js';
 
 export const ownerAccountCommand: CommandModule = {
   data: new SlashCommandBuilder()
@@ -79,18 +80,43 @@ export const ownerAccountCommand: CommandModule = {
       const status = mineflayerManager.getStatus();
       const uptimeStr = status.uptime ? `${Math.floor(status.uptime / 1000)}s` : 'N/A';
 
+      const connBadge = status.connected
+        ? '🟢 Connected'
+        : status.connecting
+        ? `🟡 Connecting (${status.phase})`
+        : status.circuitBreakerTripped
+        ? '🔴 Paused (Circuit Breaker Tripped)'
+        : '🔴 Disconnected';
+
       const embed = infoEmbed(
-        'Mineflayer Status',
-        `**Connection**: ${status.connected ? '🟢 Connected' : status.connecting ? '🟡 Connecting' : '🔴 Disconnected'}\n` +
+        'Mineflayer Status & Diagnostics',
+        `**Connection**: ${connBadge}\n` +
+        `**Protocol Phase**: \`${status.phase}\`\n` +
         `**Username**: \`${status.username || 'None'}\`\n` +
         `**Target Server**: \`${status.server}\`\n` +
         `**Current Location**: \`${status.currentSubserver}\` ${status.inSkyPvP ? '⚔️ **In SkyPvP**' : '⏳ **In Lobby/Hub**'}\n` +
         `**Uptime**: \`${uptimeStr}\`\n` +
-        `**Last Error**: \`${status.lastError || 'None'}\``
+        `**Consecutive Failures**: \`${status.reconnectAttempts}/5\` ${status.circuitBreakerTripped ? '⚠️ **Circuit Breaker Active (Auto-reconnect Paused)**' : ''}\n` +
+        `**Last Disconnect Reason**: \`${status.lastDisconnectReason || 'None'}\`\n` +
+        `**Last Disconnect Phase**: \`${status.lastDisconnectPhase || 'None'}\`\n` +
+        `**Last Error / Socket Code**: \`${status.lastDisconnectCode || status.lastError || 'None'}\``
       );
 
       await interaction.editReply({ embeds: [embed] });
     } else if (sub === 'connect' || sub === 'test' || sub === 'reconnect') {
+      const validation = await mineflayerSecurity.validateCredentials(guildId);
+      if (!validation.valid) {
+        await interaction.editReply({
+          embeds: [
+            errorEmbed(
+              validation.configured ? 'Credential Decryption Error' : 'No Credentials Configured',
+              validation.error || 'Please run `/owneraccount configure` to configure valid credentials.'
+            ),
+          ],
+        });
+        return;
+      }
+
       const creds = await mineflayerSecurity.getCredentials(guildId);
       if (!creds) {
         await interaction.editReply({
@@ -99,29 +125,47 @@ export const ownerAccountCommand: CommandModule = {
         return;
       }
 
-      if (mineflayerManager.isConnected()) {
-        mineflayerManager.disconnect();
-      }
-
       await interaction.editReply({
-        embeds: [infoEmbed('Connecting...', `Attempting connection as **${creds.username}**...`)],
+        embeds: [
+          infoEmbed(
+            'Connecting...',
+            `Attempting connection as **${creds.username}** to \`${env.MINEFLAYER_HOST}:${env.MINEFLAYER_PORT}\`...\n*Resetting any previous retry counters and circuit breaker.*`
+          ),
+        ],
       });
 
-      const success = await mineflayerManager.connect(creds.username, creds.password);
+      // Manual connect/reconnect resets circuit breaker and retry counters
+      const success = await mineflayerManager.manualReconnect(creds.username, creds.password);
 
       if (success) {
         await interaction.editReply({
-          embeds: [successEmbed('Connected', `Successfully connected as **${creds.username}**!`)],
+          embeds: [
+            successEmbed(
+              'Connected Successfully',
+              `Successfully authenticated and connected to PikaNetwork as **${creds.username}**!`
+            ),
+          ],
         });
       } else {
+        const latest = mineflayerManager.getStatus();
+        const reason = latest.lastDisconnectReason || latest.lastError || 'Connection failed or timed out';
         await interaction.editReply({
-          embeds: [errorEmbed('Connection Failed', 'Could not connect. Check console logs for details.')],
+          embeds: [
+            errorEmbed(
+              'Connection Failed',
+              `Could not connect to **${latest.server}**.\n\n` +
+              `**Protocol Phase**: \`${latest.phase}\`\n` +
+              `**Server Kick / Disconnect Reason**: \`${reason}\`\n` +
+              `**Socket / Error Code**: \`${latest.lastDisconnectCode || 'None'}\`\n\n` +
+              `*Check bot logs for full diagnostic trace.*`
+            ),
+          ],
         });
       }
     } else if (sub === 'disconnect') {
       mineflayerManager.disconnect();
       await interaction.editReply({
-        embeds: [successEmbed('Disconnected', 'Mineflayer bot has been disconnected.')],
+        embeds: [successEmbed('Disconnected', 'Mineflayer bot has been disconnected and listeners cleared.')],
       });
     } else if (sub === 'remove') {
       await mineflayerSecurity.removeCredentials(guildId);

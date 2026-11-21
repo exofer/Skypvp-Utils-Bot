@@ -2,6 +2,7 @@ import { mineflayerManager } from '../mineflayer/client.js';
 import { stripColorCodes } from '../utils/minecraft.js';
 import { outpostObserver, type OutpostType } from '../mineflayer/observers/outpost.js';
 import { createLogger } from '../utils/logger.js';
+import { prisma } from '../db/prisma.js';
 
 const log = createLogger('outpost-provider');
 
@@ -62,15 +63,66 @@ export class OutpostProvider {
     ],
   ]);
 
+  private initializedFromDb = false;
+  private lastScrapeFresh = false;
+
   constructor() {
     this.listenToMinecraftChat();
+    this.initializeFromDatabase().catch((err) => {
+      log.debug({ err: err?.message }, 'Deferred outpost database initialization');
+    });
   }
 
   /**
-   * Scrape and update live outposts via /outposts GUI in Mineflayer
+   * Hydrate in-memory state from database records on startup so existing
+   * outpost statuses are preserved rather than reset to default AVAILABLE
+   */
+  public async initializeFromDatabase(): Promise<void> {
+    try {
+      const records = await prisma.outpostRecord.findMany();
+      if (records && records.length > 0) {
+        for (const rec of records) {
+          const type = rec.outpostName as OutpostType;
+          const current = this.outposts.get(type);
+          if (current) {
+            this.outposts.set(type, {
+              ...current,
+              status: (rec.status as any) || current.status,
+              controllingTeam: rec.controllingTeam ?? undefined,
+              owner: rec.owner ?? undefined,
+              capturingPlayer: rec.capturingPlayer ?? undefined,
+              captureProgress: rec.captureProgress ?? undefined,
+              cooldownEndsAt: rec.cooldownEndsAt ?? undefined,
+              lastUpdated: rec.lastCheckedAt || current.lastUpdated,
+            });
+          }
+        }
+        this.initializedFromDb = true;
+        log.info({ count: records.length }, 'Hydrated initial outpost states from database');
+      }
+    } catch (err: any) {
+      log.warn({ err: err?.message }, 'Failed to hydrate outpost states from database');
+    }
+  }
+
+  /**
+   * Returns whether the most recent fetch obtained fresh scraped data from the server
+   */
+  public hasFreshData(): boolean {
+    return this.lastScrapeFresh;
+  }
+
+  /**
+   * Scrape and update live outposts via /outposts GUI in Mineflayer.
+   * If Mineflayer is disconnected or scraping fails, preserves the last valid state.
    */
   public async fetchOutposts(diagnosticMode?: boolean): Promise<OutpostInfo[]> {
+    if (!this.initializedFromDb) {
+      await this.initializeFromDatabase();
+    }
+
     if (!mineflayerManager.isConnected()) {
+      this.lastScrapeFresh = false;
       return this.getOutposts();
     }
 
@@ -94,11 +146,14 @@ export class OutpostProvider {
             lastUpdated: new Date(),
           });
         }
+        this.lastScrapeFresh = true;
+        return this.getOutposts();
       }
     } catch (err: any) {
-      log.error({ err: err?.message }, 'Failed to fetch outposts via GUI scraper');
+      log.error({ err: err?.message }, 'Failed to fetch outposts via GUI scraper; retaining last valid state');
     }
 
+    this.lastScrapeFresh = false;
     return this.getOutposts();
   }
 
@@ -120,6 +175,7 @@ export class OutpostProvider {
               capturingPlayer: undefined,
               lastUpdated: new Date(),
             });
+            this.lastScrapeFresh = true;
           } else if (clean.toLowerCase().includes('started to claim') || clean.toLowerCase().includes('is claiming')) {
             const teamMatch = clean.match(/team\s+([a-zA-Z0-9_]{3,16})/i);
             const team = teamMatch?.[1];
@@ -129,6 +185,7 @@ export class OutpostProvider {
               controllingTeam: team,
               lastUpdated: new Date(),
             });
+            this.lastScrapeFresh = true;
           } else if (clean.toLowerCase().includes('capturing') || clean.toLowerCase().includes('is capping')) {
             const playerMatch = clean.match(/([a-zA-Z0-9_]{3,16})\s+(?:is capturing|is capping)/i);
             const player = playerMatch?.[1];
@@ -138,6 +195,7 @@ export class OutpostProvider {
               capturingPlayer: player,
               lastUpdated: new Date(),
             });
+            this.lastScrapeFresh = true;
           }
         }
       }

@@ -2,8 +2,19 @@ import mineflayer, { type Bot } from 'mineflayer';
 import { EventEmitter } from 'node:events';
 import { createLogger } from '../utils/logger.js';
 import { env } from '../config/env.js';
+import { extractPlainText, stripColorCodes } from '../utils/minecraft.js';
 
 const log = createLogger('mineflayer-client');
+
+export type ConnectionPhase =
+  | 'idle'
+  | 'tcp_connecting'
+  | 'handshaking'
+  | 'login'
+  | 'configuration'
+  | 'play'
+  | 'spawned'
+  | 'disconnected';
 
 export interface MineflayerStatus {
   connected: boolean;
@@ -14,6 +25,46 @@ export interface MineflayerStatus {
   currentSubserver: string;
   uptime: number | null;
   lastError: string | null;
+  phase: ConnectionPhase;
+  lastDisconnectReason: string | null;
+  lastDisconnectPhase: string | null;
+  lastDisconnectCode: string | null;
+  lastDisconnectAt: Date | null;
+  reconnectAttempts: number;
+  circuitBreakerTripped: boolean;
+  autoReconnectPaused: boolean;
+}
+
+/**
+ * Safely parse Minecraft disconnect packets, kick reasons, and chat components
+ * into a human-readable clean text string without control/color codes
+ */
+export function parseDisconnectReason(raw: any): string {
+  if (!raw) return 'Unknown disconnect reason';
+
+  try {
+    if (typeof raw === 'object' && raw.reason !== undefined) {
+      return parseDisconnectReason(raw.reason);
+    }
+
+    const extracted = extractPlainText(raw);
+    const cleaned = stripColorCodes(extracted).replace(/\s+/g, ' ').trim();
+    if (cleaned.length > 0) {
+      return cleaned;
+    }
+  } catch (err: any) {
+    log.debug({ err: err?.message }, 'Error parsing disconnect packet');
+  }
+
+  if (typeof raw === 'string') {
+    return stripColorCodes(raw).trim() || 'Unknown disconnect reason';
+  }
+
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw);
+  }
 }
 
 export class MineflayerManager extends EventEmitter {
@@ -23,10 +74,25 @@ export class MineflayerManager extends EventEmitter {
   private connectTime: number | null = null;
   private lastError: string | null = null;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private stableTimer: NodeJS.Timeout | null = null;
   private currentUsername: string | null = null;
   private currentPassword?: string;
   private autoReconnectEnabled = true;
   private loggedIn = false;
+
+  // Diagnostics and circuit-breaker state
+  private phase: ConnectionPhase = 'idle';
+  private lastDisconnectReason: string | null = null;
+  private lastDisconnectPhase: string | null = null;
+  private lastDisconnectCode: string | null = null;
+  private lastDisconnectAt: Date | null = null;
+  private reconnectAttempts = 0;
+  private circuitBreakerTripped = false;
+
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private static readonly BASE_RECONNECT_DELAY_MS = 10000; // 10s
+  private static readonly MAX_RECONNECT_DELAY_MS = 120000; // 2m
+  private static readonly STABLE_THRESHOLD_MS = 30000; // 30s connected = healthy
 
   constructor() {
     super();
@@ -43,6 +109,14 @@ export class MineflayerManager extends EventEmitter {
       currentSubserver: loc.server,
       uptime: this.connectTime ? Date.now() - this.connectTime : null,
       lastError: this.lastError,
+      phase: this.phase,
+      lastDisconnectReason: this.lastDisconnectReason,
+      lastDisconnectPhase: this.lastDisconnectPhase,
+      lastDisconnectCode: this.lastDisconnectCode,
+      lastDisconnectAt: this.lastDisconnectAt,
+      reconnectAttempts: this.reconnectAttempts,
+      circuitBreakerTripped: this.circuitBreakerTripped,
+      autoReconnectPaused: this.circuitBreakerTripped || !this.autoReconnectEnabled,
     };
   }
 
@@ -84,26 +158,116 @@ export class MineflayerManager extends EventEmitter {
     return this.connected && this.bot !== null;
   }
 
-  public async connect(username: string, password?: string): Promise<boolean> {
-    if (this.connecting || this.connected) {
-      log.warn('Mineflayer bot is already connecting or connected');
-      return false;
+  public isConnecting(): boolean {
+    return this.connecting;
+  }
+
+  /**
+   * Safe teardown of all listeners, socket resources, and bot instance
+   */
+  private cleanupBot(): void {
+    if (this.stableTimer) {
+      clearTimeout(this.stableTimer);
+      this.stableTimer = null;
     }
 
-    this.connecting = true;
-    this.currentUsername = username;
-    this.currentPassword = password;
-    this.lastError = null;
+    if (this.bot) {
+      try {
+        const client = (this.bot as any)?._client;
+        if (client) {
+          if (client.socket) {
+            client.socket.removeAllListeners();
+          }
+          client.removeAllListeners();
+        }
+      } catch (e: any) {
+        log.debug({ err: e?.message }, 'Error removing protocol client listeners');
+      }
+
+      try {
+        this.bot.removeAllListeners();
+      } catch (e: any) {
+        log.debug({ err: e?.message }, 'Error removing bot listeners');
+      }
+
+      try {
+        this.bot.quit('Teardown and cleanup');
+      } catch {}
+
+      this.bot = null;
+    }
+
+    this.connected = false;
+    this.connecting = false;
     this.loggedIn = false;
+  }
+
+  /**
+   * Reset circuit breaker and attempt connection (owner-controlled recovery)
+   */
+  public async manualReconnect(username: string, password?: string): Promise<boolean> {
+    log.info({ username }, 'Manual reconnect requested: resetting circuit breaker and retry counters');
+    this.circuitBreakerTripped = false;
+    this.reconnectAttempts = 0;
+    this.autoReconnectEnabled = true;
+
+    this.disconnect();
+    return this.connect(username, password, true);
+  }
+
+  /**
+   * Connect to Minecraft server with comprehensive lifecycle hooks
+   */
+  public async connect(username: string, password?: string, isExplicit = false): Promise<boolean> {
+    if (this.connecting || this.connected) {
+      if (!isExplicit) {
+        log.warn('Mineflayer bot is already connecting or connected. Ignoring duplicate request.');
+        return false;
+      }
+      this.cleanupBot();
+    }
+
+    if (this.circuitBreakerTripped && !isExplicit) {
+      log.warn(
+        { attempts: this.reconnectAttempts, max: MineflayerManager.MAX_RECONNECT_ATTEMPTS },
+        'Mineflayer auto-reconnect circuit breaker is TRIPPED. Manual recovery required via /owneraccount connect.'
+      );
+      return false;
+    }
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
 
+    this.connecting = true;
+    this.connected = false;
+    this.phase = 'tcp_connecting';
+    this.currentUsername = username;
+    this.currentPassword = password;
+    this.lastError = null;
+    this.loggedIn = false;
+
     return new Promise((resolve) => {
+      let resolved = false;
+      const safeResolve = (val: boolean) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(val);
+        }
+      };
+
       try {
-        log.info({ username, host: env.MINEFLAYER_HOST }, 'Initializing Mineflayer bot connection');
+        log.info(
+          {
+            username,
+            host: env.MINEFLAYER_HOST,
+            port: env.MINEFLAYER_PORT,
+            attempt: this.reconnectAttempts + 1,
+            maxAttempts: MineflayerManager.MAX_RECONNECT_ATTEMPTS,
+          },
+          'Initializing Mineflayer bot connection'
+        );
 
         this.bot = mineflayer.createBot({
           host: env.MINEFLAYER_HOST,
@@ -114,11 +278,111 @@ export class MineflayerManager extends EventEmitter {
           hideErrors: false,
         });
 
+        // ==========================================
+        // 1. Low-level Protocol Client Listeners
+        // ==========================================
+        const client = (this.bot as any)?._client;
+        if (client) {
+          client.on('connect_allowed', () => {
+            this.phase = 'tcp_connecting';
+            log.debug('Protocol client TCP connect permitted');
+          });
+
+          client.on('connect', () => {
+            this.phase = 'handshaking';
+            log.info(
+              { host: env.MINEFLAYER_HOST, port: env.MINEFLAYER_PORT },
+              'TCP socket connection established with Minecraft server'
+            );
+          });
+
+          client.on('state', (newState: string, oldState: string) => {
+            this.phase = newState as ConnectionPhase;
+            log.info(
+              { fromPhase: oldState, toPhase: newState },
+              'Minecraft protocol state transitioned'
+            );
+          });
+
+          client.on('session', () => {
+            log.debug('Minecraft client protocol session initialized');
+          });
+
+          client.on('disconnect', (packet: any) => {
+            const reason = parseDisconnectReason(packet);
+            this.lastDisconnectReason = reason;
+            this.lastDisconnectPhase = this.phase;
+            log.warn(
+              { phase: this.phase, reason },
+              'Minecraft protocol disconnect packet received during handshake/login'
+            );
+          });
+
+          client.on('kick_disconnect', (packet: any) => {
+            const reason = parseDisconnectReason(packet);
+            this.lastDisconnectReason = reason;
+            this.lastDisconnectPhase = this.phase;
+            log.warn(
+              { phase: this.phase, reason },
+              'Minecraft protocol kick_disconnect packet received'
+            );
+          });
+
+          client.on('error', (err: any) => {
+            const code = (err as any)?.code || 'PROTOCOL_ERROR';
+            this.lastDisconnectCode = code;
+            log.error(
+              { err: err?.message, code, phase: this.phase },
+              'Minecraft low-level protocol client error'
+            );
+          });
+
+          if (client.socket) {
+            client.socket.on('error', (err: any) => {
+              const code = (err as any)?.code || 'SOCKET_ERROR';
+              this.lastDisconnectCode = code;
+              log.error(
+                { err: err?.message, code, phase: this.phase },
+                'Minecraft TCP socket connection error'
+              );
+            });
+
+            client.socket.on('close', (hadError: boolean) => {
+              log.debug({ hadError, phase: this.phase }, 'Minecraft TCP socket closed');
+            });
+          }
+
+          client.on('end', (reason: any) => {
+            const endCode = reason || (client as any)?._endReason || 'socketClosed';
+            this.lastDisconnectCode = String(endCode);
+            log.debug({ endCode, phase: this.phase }, 'Minecraft protocol client ended');
+          });
+        }
+
+        // ==========================================
+        // 2. High-Level Mineflayer Bot Listeners
+        // ==========================================
+        this.bot.on('login', () => {
+          this.phase = 'play';
+          log.info('Mineflayer bot successfully negotiated Minecraft login');
+        });
+
         this.bot.on('spawn', () => {
-          log.info('Mineflayer bot spawned in game');
           this.connected = true;
           this.connecting = false;
+          this.phase = 'spawned';
           if (!this.connectTime) this.connectTime = Date.now();
+
+          log.info('Mineflayer bot spawned into game world');
+
+          // Reset reconnect attempts after staying connected stably for 30s
+          if (this.stableTimer) clearTimeout(this.stableTimer);
+          this.stableTimer = setTimeout(() => {
+            if (this.connected) {
+              this.reconnectAttempts = 0;
+              log.info('Mineflayer connection healthy; consecutive failure counter reset to 0');
+            }
+          }, MineflayerManager.STABLE_THRESHOLD_MS);
 
           // Check inventory items
           try {
@@ -152,7 +416,7 @@ export class MineflayerManager extends EventEmitter {
           }, 4500);
 
           this.emit('ready');
-          resolve(true);
+          safeResolve(true);
         });
 
         this.bot.on('scoreboardTitleChanged', (sb: any) => {
@@ -180,7 +444,11 @@ export class MineflayerManager extends EventEmitter {
             } else if (lower.includes('/login') || lower.includes('login with') || lower.includes('please login')) {
               log.info('Server requested login, sending /login');
               this.sendCommand(`/login ${password}`);
-            } else if (lower.includes('successfully logged in') || lower.includes('successful login') || lower.includes('welcome')) {
+            } else if (
+              lower.includes('successfully logged in') ||
+              lower.includes('successful login') ||
+              lower.includes('welcome')
+            ) {
               this.loggedIn = true;
               log.info('Successfully authenticated, navigating to SkyPvP (/server skypvp)');
               setTimeout(() => this.sendCommand('/server skypvp'), 2000);
@@ -200,30 +468,61 @@ export class MineflayerManager extends EventEmitter {
           this.emit('windowOpen', window);
         });
 
-        this.bot.on('kicked', (reason: any) => {
-          const kickStr = typeof reason === 'string' ? reason : JSON.stringify(reason);
-          log.warn({ reason: kickStr }, 'Mineflayer bot was kicked from server');
-          this.handleDisconnect(`Kicked: ${kickStr}`);
-          resolve(false);
+        this.bot.on('kicked', (reason: any, loggedIn: boolean) => {
+          const parsedReason = parseDisconnectReason(reason);
+          this.lastDisconnectReason = parsedReason;
+          this.lastDisconnectPhase = this.phase;
+          this.lastDisconnectAt = new Date();
+
+          log.warn(
+            { phase: this.phase, loggedIn, reason: parsedReason },
+            'Mineflayer bot kicked from server'
+          );
+
+          this.handleDisconnect(`Kicked: ${parsedReason}`);
+          safeResolve(false);
         });
 
-        this.bot.on('end', () => {
-          log.warn('Mineflayer bot connection ended');
-          this.handleDisconnect('Connection ended');
-          resolve(false);
+        this.bot.on('end', (reason: any) => {
+          const endCode = reason || (this.bot as any)?._client?._endReason || 'socketClosed';
+          this.lastDisconnectCode = String(endCode);
+          this.lastDisconnectAt = new Date();
+
+          // Retain structured kick reason if kick packet arrived first
+          const disconnectDescription = this.lastDisconnectReason
+            ? this.lastDisconnectReason
+            : `Connection closed (${endCode})`;
+
+          log.warn(
+            { phase: this.phase, endCode, reason: disconnectDescription },
+            'Mineflayer bot connection ended'
+          );
+
+          this.handleDisconnect(disconnectDescription);
+          safeResolve(false);
         });
 
         this.bot.on('error', (err: any) => {
-          log.error({ err: err?.message }, 'Mineflayer bot error');
-          this.lastError = err?.message;
-          this.handleDisconnect(err?.message);
-          resolve(false);
+          const errorMsg = err?.message || 'Unknown Mineflayer error';
+          this.lastError = errorMsg;
+          this.lastDisconnectCode = (err as any)?.code || 'BOT_ERROR';
+          this.lastDisconnectAt = new Date();
+
+          log.error(
+            { err: errorMsg, code: (err as any)?.code, phase: this.phase },
+            'Mineflayer bot runtime error'
+          );
+
+          this.handleDisconnect(errorMsg);
+          safeResolve(false);
         });
       } catch (err: any) {
-        log.error({ err: err?.message }, 'Failed to create Mineflayer instance');
-        this.lastError = err?.message ?? 'Unknown connection error';
+        const errorMsg = err?.message ?? 'Failed to instantiate Mineflayer client';
+        log.error({ err: errorMsg }, 'Exception creating Mineflayer instance');
+        this.lastError = errorMsg;
         this.connecting = false;
-        resolve(false);
+        this.phase = 'disconnected';
+        safeResolve(false);
       }
     });
   }
@@ -240,39 +539,86 @@ export class MineflayerManager extends EventEmitter {
 
   public disconnect(): void {
     this.autoReconnectEnabled = false;
+    this.circuitBreakerTripped = false;
+    this.reconnectAttempts = 0;
+
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
-    if (this.bot) {
-      log.info('Disconnecting Mineflayer bot');
-      this.bot.quit();
-      this.bot = null;
-    }
-    this.connected = false;
-    this.connecting = false;
+
+    log.info('Explicitly disconnecting Mineflayer bot and cleaning up resources');
+    this.cleanupBot();
+
+    this.phase = 'disconnected';
     this.connectTime = null;
-    this.loggedIn = false;
   }
 
   private handleDisconnect(reason: string): void {
+    const previousPhase = this.phase;
+    this.phase = 'disconnected';
     this.connected = false;
     this.connecting = false;
     this.connectTime = null;
     this.lastError = reason;
     this.loggedIn = false;
+
+    this.cleanupBot();
     this.emit('disconnected', reason);
 
-    // Auto-reconnect if enabled
+    // Auto-reconnect handling with exponential backoff and circuit breaker
     if (this.autoReconnectEnabled && this.currentUsername) {
-      log.info('Scheduling Mineflayer auto-reconnect in 8 seconds...');
+      this.reconnectAttempts++;
+
+      if (this.reconnectAttempts >= MineflayerManager.MAX_RECONNECT_ATTEMPTS) {
+        this.circuitBreakerTripped = true;
+        log.warn(
+          {
+            attempts: this.reconnectAttempts,
+            max: MineflayerManager.MAX_RECONNECT_ATTEMPTS,
+            lastPhase: previousPhase,
+            reason,
+          },
+          'Circuit breaker TRIPPED: stopped aggressive reconnect loop after 5 consecutive failures. Use /owneraccount connect or /owneraccount reconnect to resume.'
+        );
+        this.emit('circuitBreakerTripped', {
+          attempts: this.reconnectAttempts,
+          reason,
+          phase: previousPhase,
+        });
+        return;
+      }
+
+      // Exponential backoff with jitter: base * 1.5^(attempt - 1) + jitter
+      const backoffFactor = Math.pow(1.5, this.reconnectAttempts - 1);
+      const computedDelay = Math.min(
+        MineflayerManager.BASE_RECONNECT_DELAY_MS * backoffFactor,
+        MineflayerManager.MAX_RECONNECT_DELAY_MS
+      );
+      const jitter = Math.floor(Math.random() * 2500);
+      const finalDelayMs = Math.round(computedDelay + jitter);
+
+      log.info(
+        {
+          attempt: this.reconnectAttempts,
+          maxAttempts: MineflayerManager.MAX_RECONNECT_ATTEMPTS,
+          delaySeconds: Math.round(finalDelayMs / 1000),
+          lastPhase: previousPhase,
+          reason,
+        },
+        'Scheduling Mineflayer auto-reconnect with exponential backoff'
+      );
+
       if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = setTimeout(() => {
-        log.info('Executing scheduled auto-reconnect...');
-        if (this.currentUsername) {
+        log.info(
+          { attempt: this.reconnectAttempts, username: this.currentUsername },
+          'Executing scheduled Mineflayer auto-reconnect...'
+        );
+        if (this.currentUsername && !this.circuitBreakerTripped && this.autoReconnectEnabled) {
           this.connect(this.currentUsername, this.currentPassword);
         }
-      }, 8000);
+      }, finalDelayMs);
     }
   }
 }

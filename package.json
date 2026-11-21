@@ -19,7 +19,8 @@
     "commands:register": "tsx src/register-commands.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "diagnose": "tsx scripts/diagnose-connection.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

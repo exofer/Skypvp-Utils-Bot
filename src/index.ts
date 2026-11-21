@@ -198,15 +198,23 @@ async function bootstrap() {
       where: { enabled: true },
     });
     if (account) {
-      const creds = await mineflayerSecurity.getCredentials(account.guildId);
-      if (creds) {
-        log.info(
-          { guildId: account.guildId, username: creds.username },
-          'Auto-connecting configured Mineflayer account on startup'
+      const validation = await mineflayerSecurity.validateCredentials(account.guildId);
+      if (!validation.valid) {
+        log.warn(
+          { guildId: account.guildId, error: validation.error },
+          'Mineflayer startup auto-connect skipped: stored credentials failed decryption (ENCRYPTION_KEY may have changed)'
         );
-        mineflayerManager.connect(creds.username, creds.password).catch((err) => {
-          log.error({ err: err?.message }, 'Error during Mineflayer auto-connect on startup');
-        });
+      } else {
+        const creds = await mineflayerSecurity.getCredentials(account.guildId);
+        if (creds) {
+          log.info(
+            { guildId: account.guildId, username: creds.username },
+            'Auto-connecting configured Mineflayer account on startup'
+          );
+          mineflayerManager.connect(creds.username, creds.password).catch((err) => {
+            log.error({ err: err?.message }, 'Error during Mineflayer auto-connect on startup');
+          });
+        }
       }
     }
   } catch (err: any) {
