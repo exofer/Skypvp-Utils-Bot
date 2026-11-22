@@ -166,10 +166,12 @@ describe('SkyPvP Pre-Event Early Alerts & Lifecycle', () => {
 
   it('guarantees eventService deduplicates upcoming and started alerts across polling cycles', async () => {
     const { eventService } = await import('../src/services/events.js');
+    const { prisma } = await import('../src/db/prisma.js');
     const { vi } = await import('vitest');
 
     const earlySpy = vi.spyOn(eventService as any, 'broadcastEventEarlyWarning').mockResolvedValue(undefined);
     const startSpy = vi.spyOn(eventService as any, 'broadcastEventStart').mockResolvedValue(undefined);
+    const prismaSpy = vi.spyOn(prisma.eventRecord, 'create').mockResolvedValue({} as any);
 
     const mockState = {
       type: 'BLOOD_LUST' as const,
@@ -224,5 +226,6 @@ describe('SkyPvP Pre-Event Early Alerts & Lifecycle', () => {
 
     earlySpy.mockRestore();
     startSpy.mockRestore();
+    prismaSpy.mockRestore();
   });
 });

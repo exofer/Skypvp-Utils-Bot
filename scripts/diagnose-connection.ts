@@ -5,6 +5,7 @@ import mineflayer from 'mineflayer';
 import { prisma } from '../src/db/prisma.js';
 import { mineflayerSecurity } from '../src/mineflayer/security.js';
 import { parseDisconnectReason } from '../src/mineflayer/client.js';
+import { maskProxyUrl, testProxyConnection, createMineflayerProxyConnect } from '../src/mineflayer/proxy.js';
 import { env } from '../src/config/env.js';
 
 async function runDiagnostic() {
@@ -12,9 +13,11 @@ async function runDiagnostic() {
   console.log('   SKYPVP UTILS — MINEFLAYER CONNECTION DIAGNOSTIC   ');
   console.log('=====================================================\n');
 
-  // 1. Credential Decryption
-  console.log('[1/5] Checking stored credentials and decryption key...');
+  // 1. Credential & Proxy Decryption
+  console.log('[1/5] Checking stored credentials, proxy settings, and encryption key...');
   const configs = await prisma.mineflayerAccountConfig.findMany();
+  let activeProxy: string | null = null;
+
   if (configs.length === 0) {
     console.log('  ⚠️  No Mineflayer bot accounts configured in database.');
     console.log('      Configure one in Discord via /owneraccount configure <username> [password]\n');
@@ -27,9 +30,24 @@ async function runDiagnostic() {
       } else {
         console.log(`    ❌ Decryption FAILED: ${validation.error}`);
       }
+
+      const proxy = await mineflayerSecurity.getProxy(cfg.guildId);
+      if (proxy) {
+        activeProxy = proxy;
+        console.log(`    🛡️  Proxy configured: ${maskProxyUrl(proxy)}`);
+      }
     }
-    console.log();
   }
+
+  if (!activeProxy && env.MINEFLAYER_PROXY_URL) {
+    activeProxy = env.MINEFLAYER_PROXY_URL;
+    console.log(`  🛡️  Proxy configured via .env: ${maskProxyUrl(activeProxy)}`);
+  }
+
+  if (!activeProxy) {
+    console.log('  ℹ️  No proxy configured (using direct TCP connection)');
+  }
+  console.log();
 
   // 2. DNS & SRV Resolution
   const host = env.MINEFLAYER_HOST;
@@ -117,17 +135,34 @@ async function runDiagnostic() {
     if (c?.username) testUser = c.username;
   }
 
-  console.log(`  • Connecting test bot as "${testUser}"...`);
+  if (activeProxy) {
+    console.log(`  • Testing proxy tunnel to ${host}:${port} via ${maskProxyUrl(activeProxy)}...`);
+    const proxyCheck = await testProxyConnection(activeProxy, host, port);
+    if (proxyCheck.success) {
+      console.log(`    ✅ Proxy tunnel established in ${proxyCheck.latencyMs}ms (${proxyCheck.protocol.toUpperCase()})`);
+    } else {
+      console.log(`    ❌ Proxy tunnel test failed: ${proxyCheck.error}`);
+    }
+  }
+
+  const routeLabel = activeProxy ? `via proxy ${maskProxyUrl(activeProxy)}` : 'via direct TCP';
+  console.log(`  • Connecting test bot as "${testUser}" (${routeLabel})...`);
   await new Promise<void>((resolve) => {
     const start = Date.now();
-    const bot = mineflayer.createBot({
+    const botOptions: any = {
       host,
       port,
       username: testUser,
       auth: 'offline',
       version: '1.20.4',
       hideErrors: false,
-    });
+    };
+
+    if (activeProxy) {
+      botOptions.connect = createMineflayerProxyConnect(activeProxy, host, port);
+    }
+
+    const bot = mineflayer.createBot(botOptions);
 
     const timer = setTimeout(() => {
       console.log(`  ⏱️  Test bot 12s timeout reached`);

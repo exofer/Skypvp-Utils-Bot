@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { createLogger } from '../utils/logger.js';
+import { env } from '../config/env.js';
 
 const log = createLogger('mineflayer-security');
 
@@ -107,6 +108,66 @@ export class MineflayerSecurity {
     return prisma.mineflayerAccountConfig.deleteMany({
       where: { guildId },
     });
+  }
+
+  /**
+   * Store encrypted proxy URL for a guild or global bot instance
+   */
+  public async storeProxy(guildId: string, proxyUrl: string) {
+    const encryptedProxyUrl = encrypt(proxyUrl.trim());
+
+    log.info({ guildId }, 'Encrypting and persisting Mineflayer proxy configuration');
+
+    return prisma.mineflayerAccountConfig.upsert({
+      where: { guildId },
+      update: {
+        encryptedProxyUrl,
+      },
+      create: {
+        guildId,
+        encryptedProxyUrl,
+      },
+    });
+  }
+
+  /**
+   * Remove stored proxy configuration (reverts to direct or .env proxy)
+   */
+  public async removeProxy(guildId: string) {
+    log.info({ guildId }, 'Removing stored Mineflayer proxy configuration');
+    return prisma.mineflayerAccountConfig.updateMany({
+      where: { guildId },
+      data: {
+        encryptedProxyUrl: null,
+      },
+    });
+  }
+
+  /**
+   * Retrieve and decrypt proxy URL
+   * Returns DB configured proxy first, falling back to MINEFLAYER_PROXY_URL from .env
+   */
+  public async getProxy(guildId?: string): Promise<string | null> {
+    if (guildId) {
+      try {
+        const config = await prisma.mineflayerAccountConfig.findUnique({
+          where: { guildId },
+        });
+
+        if (config?.encryptedProxyUrl) {
+          return decrypt(config.encryptedProxyUrl);
+        }
+      } catch (err: any) {
+        log.error({ err: err?.message, guildId }, 'Failed to decrypt stored proxy configuration');
+      }
+    }
+
+    // Fallback to environment variable if configured
+    if (env.MINEFLAYER_PROXY_URL && env.MINEFLAYER_PROXY_URL.trim().length > 0) {
+      return env.MINEFLAYER_PROXY_URL.trim();
+    }
+
+    return null;
   }
 }
 

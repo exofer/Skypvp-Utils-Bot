@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { createLogger } from '../utils/logger.js';
 import { env } from '../config/env.js';
 import { extractPlainText, stripColorCodes } from '../utils/minecraft.js';
+import { createMineflayerProxyConnect, maskProxyUrl } from './proxy.js';
 
 const log = createLogger('mineflayer-client');
 
@@ -21,6 +22,7 @@ export interface MineflayerStatus {
   connecting: boolean;
   username: string | null;
   server: string;
+  proxy: string | null;
   inSkyPvP: boolean;
   currentSubserver: string;
   uptime: number | null;
@@ -77,6 +79,7 @@ export class MineflayerManager extends EventEmitter {
   private stableTimer: NodeJS.Timeout | null = null;
   private currentUsername: string | null = null;
   private currentPassword?: string;
+  private currentProxyUrl: string | null = null;
   private autoReconnectEnabled = true;
   private loggedIn = false;
 
@@ -105,6 +108,7 @@ export class MineflayerManager extends EventEmitter {
       connecting: this.connecting,
       username: this.currentUsername,
       server: `${env.MINEFLAYER_HOST}:${env.MINEFLAYER_PORT}`,
+      proxy: this.currentProxyUrl ? maskProxyUrl(this.currentProxyUrl) : null,
       inSkyPvP: loc.inSkyPvP,
       currentSubserver: loc.server,
       uptime: this.connectTime ? Date.now() - this.connectTime : null,
@@ -118,6 +122,10 @@ export class MineflayerManager extends EventEmitter {
       circuitBreakerTripped: this.circuitBreakerTripped,
       autoReconnectPaused: this.circuitBreakerTripped || !this.autoReconnectEnabled,
     };
+  }
+
+  public setProxy(proxyUrl: string | null): void {
+    this.currentProxyUrl = proxyUrl;
   }
 
   public getCurrentLocation(): { server: string; inSkyPvP: boolean; scoreboard: string[] } {
@@ -205,20 +213,25 @@ export class MineflayerManager extends EventEmitter {
   /**
    * Reset circuit breaker and attempt connection (owner-controlled recovery)
    */
-  public async manualReconnect(username: string, password?: string): Promise<boolean> {
+  public async manualReconnect(username: string, password?: string, proxyUrl?: string): Promise<boolean> {
     log.info({ username }, 'Manual reconnect requested: resetting circuit breaker and retry counters');
     this.circuitBreakerTripped = false;
     this.reconnectAttempts = 0;
     this.autoReconnectEnabled = true;
 
     this.disconnect();
-    return this.connect(username, password, true);
+    return this.connect(username, password, true, proxyUrl);
   }
 
   /**
    * Connect to Minecraft server with comprehensive lifecycle hooks
    */
-  public async connect(username: string, password?: string, isExplicit = false): Promise<boolean> {
+  public async connect(
+    username: string,
+    password?: string,
+    isExplicit = false,
+    proxyUrl?: string
+  ): Promise<boolean> {
     if (this.connecting || this.connected) {
       if (!isExplicit) {
         log.warn('Mineflayer bot is already connecting or connected. Ignoring duplicate request.');
@@ -240,6 +253,10 @@ export class MineflayerManager extends EventEmitter {
       this.reconnectTimeout = null;
     }
 
+    if (proxyUrl !== undefined) {
+      this.currentProxyUrl = proxyUrl;
+    }
+
     this.connecting = true;
     this.connected = false;
     this.phase = 'tcp_connecting';
@@ -258,25 +275,46 @@ export class MineflayerManager extends EventEmitter {
       };
 
       try {
-        log.info(
-          {
-            username,
-            host: env.MINEFLAYER_HOST,
-            port: env.MINEFLAYER_PORT,
-            attempt: this.reconnectAttempts + 1,
-            maxAttempts: MineflayerManager.MAX_RECONNECT_ATTEMPTS,
-          },
-          'Initializing Mineflayer bot connection'
-        );
-
-        this.bot = mineflayer.createBot({
+        const botOptions: any = {
           host: env.MINEFLAYER_HOST,
           port: env.MINEFLAYER_PORT,
           username,
           auth: 'offline', // PikaNetwork offline-mode/cracked support
           version: '1.20.4',
           hideErrors: false,
-        });
+        };
+
+        if (this.currentProxyUrl) {
+          botOptions.connect = createMineflayerProxyConnect(
+            this.currentProxyUrl,
+            env.MINEFLAYER_HOST,
+            env.MINEFLAYER_PORT
+          );
+          log.info(
+            {
+              username,
+              host: env.MINEFLAYER_HOST,
+              port: env.MINEFLAYER_PORT,
+              proxy: maskProxyUrl(this.currentProxyUrl),
+              attempt: this.reconnectAttempts + 1,
+              maxAttempts: MineflayerManager.MAX_RECONNECT_ATTEMPTS,
+            },
+            'Initializing Mineflayer bot connection via proxy'
+          );
+        } else {
+          log.info(
+            {
+              username,
+              host: env.MINEFLAYER_HOST,
+              port: env.MINEFLAYER_PORT,
+              attempt: this.reconnectAttempts + 1,
+              maxAttempts: MineflayerManager.MAX_RECONNECT_ATTEMPTS,
+            },
+            'Initializing Mineflayer bot connection (direct TCP)'
+          );
+        }
+
+        this.bot = mineflayer.createBot(botOptions);
 
         // ==========================================
         // 1. Low-level Protocol Client Listeners
@@ -632,7 +670,7 @@ export class MineflayerManager extends EventEmitter {
           'Executing scheduled Mineflayer auto-reconnect...'
         );
         if (this.currentUsername && !this.circuitBreakerTripped && this.autoReconnectEnabled) {
-          this.connect(this.currentUsername, this.currentPassword);
+          this.connect(this.currentUsername, this.currentPassword, false, this.currentProxyUrl || undefined);
         }
       }, finalDelayMs);
     }

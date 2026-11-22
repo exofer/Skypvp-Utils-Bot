@@ -342,6 +342,7 @@ model MineflayerAccountConfig {
   guildId           String   @unique
   encryptedUsername  String?
   encryptedPassword String?
+  encryptedProxyUrl String?
   host              String   @default("play.pika-network.net")
   port              Int      @default(25565)
   autoReconnect     Boolean  @default(true)

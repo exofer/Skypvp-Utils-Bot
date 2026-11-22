@@ -38,6 +38,7 @@ const envSchema = z.object({
     .default('25565')
     .transform((v) => parseInt(v, 10))
     .pipe(z.number().int().positive()),
+  MINEFLAYER_PROXY_URL: z.string().optional().default(''),
 
   // Application
   NODE_ENV: z

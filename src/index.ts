@@ -207,11 +207,12 @@ async function bootstrap() {
       } else {
         const creds = await mineflayerSecurity.getCredentials(account.guildId);
         if (creds) {
+          const proxy = await mineflayerSecurity.getProxy(account.guildId);
           log.info(
-            { guildId: account.guildId, username: creds.username },
+            { guildId: account.guildId, username: creds.username, proxyConfigured: !!proxy },
             'Auto-connecting configured Mineflayer account on startup'
           );
-          mineflayerManager.connect(creds.username, creds.password).catch((err) => {
+          mineflayerManager.connect(creds.username, creds.password, false, proxy || undefined).catch((err) => {
             log.error({ err: err?.message }, 'Error during Mineflayer auto-connect on startup');
           });
         }

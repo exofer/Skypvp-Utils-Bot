@@ -3,6 +3,7 @@ import { PermissionLevel } from '../../permissions/levels.js';
 import type { CommandModule } from '../../types/index.js';
 import { mineflayerManager } from '../../mineflayer/client.js';
 import { mineflayerSecurity } from '../../mineflayer/security.js';
+import { maskProxyUrl, parseProxyUrl, testProxyConnection } from '../../mineflayer/proxy.js';
 import { infoEmbed, successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { env } from '../../config/env.js';
 
@@ -38,6 +39,36 @@ export const ownerAccountCommand: CommandModule = {
     )
     .addSubcommand((sub) =>
       sub.setName('remove').setDescription('Erase stored Minecraft credentials from database')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('proxy-set')
+        .setDescription('Configure a proxy for the Mineflayer bot (SOCKS5, SOCKS4, HTTP)')
+        .addStringOption((opt) =>
+          opt
+            .setName('url')
+            .setDescription('Proxy URL (e.g. socks5://user:pass@host:port or http://host:8080)')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('proxy-remove')
+        .setDescription('Remove stored proxy configuration (reverts to direct connection)')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('proxy-test')
+        .setDescription('Test connectivity through a proxy without restarting the bot')
+        .addStringOption((opt) =>
+          opt
+            .setName('url')
+            .setDescription('Optional proxy URL to test (uses configured proxy if omitted)')
+            .setRequired(false)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub.setName('proxy-status').setDescription('View current Mineflayer proxy configuration')
     )
     .addSubcommand((sub) =>
       sub
@@ -88,12 +119,15 @@ export const ownerAccountCommand: CommandModule = {
         ? '🔴 Paused (Circuit Breaker Tripped)'
         : '🔴 Disconnected';
 
+      const proxyBadge = status.proxy ? `🛡️ \`${status.proxy}\`` : 'Direct TCP (No proxy)';
+
       const embed = infoEmbed(
         'Mineflayer Status & Diagnostics',
         `**Connection**: ${connBadge}\n` +
         `**Protocol Phase**: \`${status.phase}\`\n` +
         `**Username**: \`${status.username || 'None'}\`\n` +
         `**Target Server**: \`${status.server}\`\n` +
+        `**Network Route / Proxy**: ${proxyBadge}\n` +
         `**Current Location**: \`${status.currentSubserver}\` ${status.inSkyPvP ? '⚔️ **In SkyPvP**' : '⏳ **In Lobby/Hub**'}\n` +
         `**Uptime**: \`${uptimeStr}\`\n` +
         `**Consecutive Failures**: \`${status.reconnectAttempts}/5\` ${status.circuitBreakerTripped ? '⚠️ **Circuit Breaker Active (Auto-reconnect Paused)**' : ''}\n` +
@@ -103,6 +137,109 @@ export const ownerAccountCommand: CommandModule = {
       );
 
       await interaction.editReply({ embeds: [embed] });
+    } else if (sub === 'proxy-set') {
+      const url = interaction.options.getString('url', true);
+      try {
+        const parsed = parseProxyUrl(url);
+        await mineflayerSecurity.storeProxy(guildId, url);
+        mineflayerManager.setProxy(url);
+
+        await interaction.editReply({
+          embeds: [
+            successEmbed(
+              'Proxy Configured',
+              `Mineflayer proxy set to **${maskProxyUrl(url)}** (${parsed.protocol.toUpperCase()}).\n` +
+              `Encrypted with AES-256-GCM. Use \`/owneraccount connect\` or \`/owneraccount reconnect\` to connect through this proxy.`
+            ),
+          ],
+        });
+      } catch (err: any) {
+        await interaction.editReply({
+          embeds: [
+            errorEmbed(
+              'Invalid Proxy URL',
+              err?.message || 'Could not parse proxy URL. Expected format: `socks5://user:pass@host:port` or `http://host:port`'
+            ),
+          ],
+        });
+      }
+    } else if (sub === 'proxy-remove') {
+      await mineflayerSecurity.removeProxy(guildId);
+      mineflayerManager.setProxy(env.MINEFLAYER_PROXY_URL || null);
+
+      await interaction.editReply({
+        embeds: [
+          successEmbed(
+            'Proxy Removed',
+            'Database proxy configuration deleted.' +
+            (env.MINEFLAYER_PROXY_URL
+              ? `\n*Falling back to .env default:* \`${maskProxyUrl(env.MINEFLAYER_PROXY_URL)}\``
+              : '\n*Reverted to direct TCP connection.*')
+          ),
+        ],
+      });
+    } else if (sub === 'proxy-status') {
+      const dbProxy = await mineflayerSecurity.getProxy(guildId);
+      const current = mineflayerManager.getStatus();
+
+      const embed = infoEmbed(
+        'Mineflayer Proxy Configuration',
+        `**Active Bot Route**: ${current.proxy ? `🛡️ \`${current.proxy}\`` : 'Direct TCP (No proxy)'}\n` +
+        `**Database Stored**: ${dbProxy ? `\`${maskProxyUrl(dbProxy)}\`` : 'None'}\n` +
+        `**Environment Default (.env)**: ${env.MINEFLAYER_PROXY_URL ? `\`${maskProxyUrl(env.MINEFLAYER_PROXY_URL)}\`` : 'None'}\n\n` +
+        `*Supported protocols: SOCKS5 (\`socks5://\`), SOCKS4 (\`socks4://\`), HTTP (\`http://\`)*`
+      );
+
+      await interaction.editReply({ embeds: [embed] });
+    } else if (sub === 'proxy-test') {
+      const inputUrl = interaction.options.getString('url');
+      const testUrl = inputUrl || (await mineflayerSecurity.getProxy(guildId));
+
+      if (!testUrl) {
+        await interaction.editReply({
+          embeds: [
+            errorEmbed(
+              'No Proxy To Test',
+              'No proxy is currently configured. Provide a proxy URL in the command: `/owneraccount proxy-test url:<url>`'
+            ),
+          ],
+        });
+        return;
+      }
+
+      await interaction.editReply({
+        embeds: [
+          infoEmbed('Testing Proxy...', `Attempting connection to PikaNetwork via \`${maskProxyUrl(testUrl)}\`...`),
+        ],
+      });
+
+      const result = await testProxyConnection(testUrl, env.MINEFLAYER_HOST, env.MINEFLAYER_PORT);
+
+      if (result.success) {
+        await interaction.editReply({
+          embeds: [
+            successEmbed(
+              'Proxy Test Succeeded',
+              `Successfully established tunnel to **${env.MINEFLAYER_HOST}:${env.MINEFLAYER_PORT}**!\n\n` +
+              `**Proxy**: \`${result.maskedUrl}\`\n` +
+              `**Protocol**: \`${result.protocol.toUpperCase()}\`\n` +
+              `**Handshake Latency**: \`${result.latencyMs}ms\``
+            ),
+          ],
+        });
+      } else {
+        await interaction.editReply({
+          embeds: [
+            errorEmbed(
+              'Proxy Test Failed',
+              `Could not reach **${env.MINEFLAYER_HOST}:${env.MINEFLAYER_PORT}** through proxy.\n\n` +
+              `**Proxy**: \`${result.maskedUrl}\`\n` +
+              `**Latency / Timeout**: \`${result.latencyMs}ms\`\n` +
+              `**Error**: \`${result.error || 'Connection failed'}\``
+            ),
+          ],
+        });
+      }
     } else if (sub === 'connect' || sub === 'test' || sub === 'reconnect') {
       const validation = await mineflayerSecurity.validateCredentials(guildId);
       if (!validation.valid) {
@@ -125,17 +262,20 @@ export const ownerAccountCommand: CommandModule = {
         return;
       }
 
+      const proxy = await mineflayerSecurity.getProxy(guildId);
+      const proxyInfo = proxy ? ` via proxy \`${maskProxyUrl(proxy)}\`` : '';
+
       await interaction.editReply({
         embeds: [
           infoEmbed(
             'Connecting...',
-            `Attempting connection as **${creds.username}** to \`${env.MINEFLAYER_HOST}:${env.MINEFLAYER_PORT}\`...\n*Resetting any previous retry counters and circuit breaker.*`
+            `Attempting connection as **${creds.username}** to \`${env.MINEFLAYER_HOST}:${env.MINEFLAYER_PORT}\`${proxyInfo}...\n*Resetting any previous retry counters and circuit breaker.*`
           ),
         ],
       });
 
       // Manual connect/reconnect resets circuit breaker and retry counters
-      const success = await mineflayerManager.manualReconnect(creds.username, creds.password);
+      const success = await mineflayerManager.manualReconnect(creds.username, creds.password, proxy || undefined);
 
       if (success) {
         await interaction.editReply({
