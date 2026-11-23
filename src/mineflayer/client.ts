@@ -185,8 +185,13 @@ export class MineflayerManager extends EventEmitter {
         if (client) {
           if (client.socket) {
             client.socket.removeAllListeners();
+            client.socket.on('error', () => {});
           }
           client.removeAllListeners();
+          // Attach safety error sink so post-cleanup timers (e.g. keepalive) cannot crash Node
+          client.on('error', (err: any) => {
+            log.debug({ err: err?.message }, 'Absorbed post-cleanup protocol client error');
+          });
         }
       } catch (e: any) {
         log.debug({ err: e?.message }, 'Error removing protocol client listeners');
@@ -194,6 +199,7 @@ export class MineflayerManager extends EventEmitter {
 
       try {
         this.bot.removeAllListeners();
+        this.bot.on('error', () => {});
       } catch (e: any) {
         log.debug({ err: e?.message }, 'Error removing bot listeners');
       }
@@ -281,6 +287,7 @@ export class MineflayerManager extends EventEmitter {
           username,
           auth: 'offline', // PikaNetwork offline-mode/cracked support
           version: '1.20.4',
+          checkTimeoutInterval: 60 * 1000, // 60s grace period for keepalive (prevents premature 30s timeout on proxy/lag)
           hideErrors: false,
         };
 
@@ -336,7 +343,7 @@ export class MineflayerManager extends EventEmitter {
             );
           });
 
-          // Safeguard against Mineflayer inventory transaction packet edge cases
+          // Safeguard against Mineflayer inventory transaction packet edge cases and unhandled error crashes
           const originalEmit = client.emit.bind(client);
           client.emit = function (event: string, ...args: any[]) {
             if (event === 'transaction') {
@@ -344,6 +351,19 @@ export class MineflayerManager extends EventEmitter {
                 return originalEmit(event, ...args);
               } catch (err: any) {
                 log.debug({ err: err?.message }, 'Handled Mineflayer confirmTransaction packet edge case safely');
+                return false;
+              }
+            }
+            if (event === 'error') {
+              try {
+                // If there are no active error listeners on client, absorb the error so Node doesn't crash with unhandled 'error'
+                if (client.listenerCount('error') === 0) {
+                  log.warn({ err: args[0]?.message }, 'Absorbed protocol client error without active listeners safely');
+                  return false;
+                }
+                return originalEmit(event, ...args);
+              } catch (err: any) {
+                log.warn({ err: err?.message }, 'Safely caught error inside protocol client emit');
                 return false;
               }
             }

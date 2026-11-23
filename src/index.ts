@@ -243,6 +243,14 @@ async function shutdown(signal: string) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+process.on('uncaughtException', (err: any) => {
+  log.error({ err: err?.message, stack: err?.stack }, 'Uncaught exception caught safely');
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  log.error({ reason: reason?.message || String(reason) }, 'Unhandled promise rejection caught safely');
+});
+
 bootstrap().catch((err) => {
   log.error({ err: err?.message, stack: err?.stack }, 'Fatal bootstrap failure');
   process.exit(1);
