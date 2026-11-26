@@ -77,6 +77,9 @@ export class MineflayerManager extends EventEmitter {
   private lastError: string | null = null;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private stableTimer: NodeJS.Timeout | null = null;
+  private activeTimers: Set<NodeJS.Timeout> = new Set();
+  private activeResolve: ((val: boolean) => void) | null = null;
+  private connectionId = 0;
   private currentUsername: string | null = null;
   private currentPassword?: string;
   private currentProxyUrl: string | null = null;
@@ -170,13 +173,39 @@ export class MineflayerManager extends EventEmitter {
     return this.connecting;
   }
 
+  public hasPendingReconnect(): boolean {
+    return this.reconnectTimeout !== null;
+  }
+
+  private scheduleTimer(fn: () => void, ms: number, connId: number): void {
+    const t = setTimeout(() => {
+      this.activeTimers.delete(t);
+      if (connId !== this.connectionId) return;
+      fn();
+    }, ms);
+    this.activeTimers.add(t);
+  }
+
   /**
-   * Safe teardown of all listeners, socket resources, and bot instance
+   * Safe teardown of all listeners, socket resources, timers, and bot instance
    */
   private cleanupBot(): void {
+    this.connectionId++;
+
     if (this.stableTimer) {
       clearTimeout(this.stableTimer);
       this.stableTimer = null;
+    }
+
+    for (const timer of this.activeTimers) {
+      clearTimeout(timer);
+    }
+    this.activeTimers.clear();
+
+    if (this.activeResolve) {
+      const resolvePending = this.activeResolve;
+      this.activeResolve = null;
+      resolvePending(false);
     }
 
     if (this.bot) {
@@ -213,6 +242,7 @@ export class MineflayerManager extends EventEmitter {
 
     this.connected = false;
     this.connecting = false;
+    this.connectTime = null;
     this.loggedIn = false;
   }
 
@@ -221,11 +251,18 @@ export class MineflayerManager extends EventEmitter {
    */
   public async manualReconnect(username: string, password?: string, proxyUrl?: string): Promise<boolean> {
     log.info({ username }, 'Manual reconnect requested: resetting circuit breaker and retry counters');
+
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
+    this.cleanupBot();
+
     this.circuitBreakerTripped = false;
     this.reconnectAttempts = 0;
     this.autoReconnectEnabled = true;
 
-    this.disconnect();
     return this.connect(username, password, true, proxyUrl);
   }
 
@@ -268,17 +305,28 @@ export class MineflayerManager extends EventEmitter {
     this.phase = 'tcp_connecting';
     this.currentUsername = username;
     this.currentPassword = password;
+    this.connectTime = null;
     this.lastError = null;
+    this.lastDisconnectReason = null;
+    this.lastDisconnectPhase = null;
+    this.lastDisconnectCode = null;
+    this.lastDisconnectAt = null;
     this.loggedIn = false;
+
+    const myConnId = ++this.connectionId;
 
     return new Promise((resolve) => {
       let resolved = false;
       const safeResolve = (val: boolean) => {
         if (!resolved) {
           resolved = true;
+          if (this.activeResolve === safeResolve) {
+            this.activeResolve = null;
+          }
           resolve(val);
         }
       };
+      this.activeResolve = safeResolve;
 
       try {
         const botOptions: any = {
@@ -437,11 +485,13 @@ export class MineflayerManager extends EventEmitter {
         // 2. High-Level Mineflayer Bot Listeners
         // ==========================================
         this.bot.on('login', () => {
+          if (myConnId !== this.connectionId) return;
           this.phase = 'play';
           log.info('Mineflayer bot successfully negotiated Minecraft login');
         });
 
         this.bot.on('spawn', () => {
+          if (myConnId !== this.connectionId) return;
           this.connected = true;
           this.connecting = false;
           this.phase = 'spawned';
@@ -452,7 +502,7 @@ export class MineflayerManager extends EventEmitter {
           // Reset reconnect attempts after staying connected stably for 30s
           if (this.stableTimer) clearTimeout(this.stableTimer);
           this.stableTimer = setTimeout(() => {
-            if (this.connected) {
+            if (myConnId === this.connectionId && this.connected) {
               this.reconnectAttempts = 0;
               log.info('Mineflayer connection healthy; consecutive failure counter reset to 0');
             }
@@ -470,16 +520,16 @@ export class MineflayerManager extends EventEmitter {
 
           // If password provided for in-game /login, attempt initial login
           if (password && !this.loggedIn) {
-            setTimeout(() => {
+            this.scheduleTimer(() => {
               if (this.connected && !this.loggedIn) {
                 log.info('Sending initial /login');
                 this.sendCommand(`/login ${password}`);
               }
-            }, 1500);
+            }, 1500, myConnId);
           }
 
           // Navigate to SkyPvP server after short delay
-          setTimeout(() => {
+          this.scheduleTimer(() => {
             if (this.connected) {
               const loc = this.getCurrentLocation();
               if (!loc.inSkyPvP) {
@@ -487,17 +537,19 @@ export class MineflayerManager extends EventEmitter {
                 this.sendCommand('/server skypvp');
               }
             }
-          }, 4500);
+          }, 4500, myConnId);
 
           this.emit('ready');
           safeResolve(true);
         });
 
         this.bot.on('scoreboardTitleChanged', (sb: any) => {
+          if (myConnId !== this.connectionId) return;
           log.info({ title: sb?.title }, 'Scoreboard title updated');
         });
 
         this.bot.on('message', (jsonMsg: any, position: any) => {
+          if (myConnId !== this.connectionId) return;
           if (position === 'game_info') {
             return; // Skip action bar messages
           }
@@ -519,13 +571,20 @@ export class MineflayerManager extends EventEmitter {
               log.info('Server requested login, sending /login');
               this.sendCommand(`/login ${password}`);
             } else if (
-              lower.includes('successfully logged in') ||
-              lower.includes('successful login') ||
-              lower.includes('welcome')
+              !this.loggedIn &&
+              (lower.includes('successfully logged in') ||
+                lower.includes('successful login') ||
+                lower.includes('welcome'))
             ) {
               this.loggedIn = true;
-              log.info('Successfully authenticated, navigating to SkyPvP (/server skypvp)');
-              setTimeout(() => this.sendCommand('/server skypvp'), 2000);
+              if (!this.getCurrentLocation().inSkyPvP) {
+                log.info('Successfully authenticated, navigating to SkyPvP (/server skypvp)');
+                this.scheduleTimer(() => {
+                  if (this.connected && !this.getCurrentLocation().inSkyPvP) {
+                    this.sendCommand('/server skypvp');
+                  }
+                }, 2000, myConnId);
+              }
             }
           }
 
@@ -538,11 +597,13 @@ export class MineflayerManager extends EventEmitter {
         });
 
         this.bot.on('windowOpen', (window: any) => {
+          if (myConnId !== this.connectionId) return;
           log.info({ title: window?.title, slots: window?.slots?.length }, 'GUI Window opened in Minecraft');
           this.emit('windowOpen', window);
         });
 
         this.bot.on('kicked', (reason: any, loggedIn: boolean) => {
+          if (myConnId !== this.connectionId) return;
           const parsedReason = parseDisconnectReason(reason);
           this.lastDisconnectReason = parsedReason;
           this.lastDisconnectPhase = this.phase;
@@ -558,6 +619,7 @@ export class MineflayerManager extends EventEmitter {
         });
 
         this.bot.on('end', (reason: any) => {
+          if (myConnId !== this.connectionId) return;
           const endCode = reason || (this.bot as any)?._client?._endReason || 'socketClosed';
           this.lastDisconnectCode = String(endCode);
           this.lastDisconnectAt = new Date();
@@ -577,6 +639,7 @@ export class MineflayerManager extends EventEmitter {
         });
 
         this.bot.on('error', (err: any) => {
+          if (myConnId !== this.connectionId) return;
           const errorMsg = err?.message || 'Unknown Mineflayer error';
           this.lastError = errorMsg;
           this.lastDisconnectCode = (err as any)?.code || 'BOT_ERROR';
@@ -611,7 +674,7 @@ export class MineflayerManager extends EventEmitter {
     this.bot.chat(cleanCmd);
   }
 
-  public disconnect(): void {
+  public disconnect(clearIdentity = false): void {
     this.autoReconnectEnabled = false;
     this.circuitBreakerTripped = false;
     this.reconnectAttempts = 0;
@@ -621,8 +684,18 @@ export class MineflayerManager extends EventEmitter {
       this.reconnectTimeout = null;
     }
 
-    log.info('Explicitly disconnecting Mineflayer bot and cleaning up resources');
+    log.info({ clearIdentity }, 'Explicitly disconnecting Mineflayer bot and cleaning up resources');
     this.cleanupBot();
+
+    if (clearIdentity) {
+      this.currentUsername = null;
+      this.currentPassword = undefined;
+      this.lastError = null;
+      this.lastDisconnectReason = null;
+      this.lastDisconnectPhase = null;
+      this.lastDisconnectCode = null;
+      this.lastDisconnectAt = null;
+    }
 
     this.phase = 'disconnected';
     this.connectTime = null;
@@ -685,6 +758,7 @@ export class MineflayerManager extends EventEmitter {
 
       if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = setTimeout(() => {
+        this.reconnectTimeout = null;
         log.info(
           { attempt: this.reconnectAttempts, username: this.currentUsername },
           'Executing scheduled Mineflayer auto-reconnect...'

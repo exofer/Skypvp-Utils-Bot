@@ -94,19 +94,70 @@ export const ownerAccountCommand: CommandModule = {
     await interaction.deferReply({ ephemeral: true });
 
     if (sub === 'configure') {
-      const username = interaction.options.getString('username', true);
+      const username = interaction.options.getString('username', true).trim();
       const password = interaction.options.getString('password') || undefined;
+
+      const prevStatus = mineflayerManager.getStatus();
+      const wasActive =
+        prevStatus.connected ||
+        prevStatus.connecting ||
+        prevStatus.circuitBreakerTripped ||
+        mineflayerManager.hasPendingReconnect();
 
       await mineflayerSecurity.storeCredentials(guildId, username, password);
 
-      await interaction.editReply({
-        embeds: [
-          successEmbed(
-            'Credentials Configured',
-            `Credentials for **${username}** stored with AES-256-GCM encryption at rest.\nPassword is never displayed or logged.`
-          ),
-        ],
-      });
+      if (wasActive) {
+        const proxy = await mineflayerSecurity.getProxy(guildId);
+        const proxyInfo = proxy ? ` via proxy \`${maskProxyUrl(proxy)}\`` : '';
+
+        await interaction.editReply({
+          embeds: [
+            infoEmbed(
+              'Switching Account...',
+              `Saved encrypted credentials for **${username}**.\nDisconnecting previous session (\`${prevStatus.username || 'None'}\`) and connecting as **${username}**${proxyInfo}...`
+            ),
+          ],
+        });
+
+        const success = await mineflayerManager.manualReconnect(username, password, proxy || undefined);
+
+        if (success) {
+          await interaction.editReply({
+            embeds: [
+              successEmbed(
+                'Account Switched & Connected',
+                `Credentials for **${username}** stored with AES-256-GCM encryption at rest.\nSuccessfully connected to PikaNetwork as **${username}**!`
+              ),
+            ],
+          });
+        } else {
+          const latest = mineflayerManager.getStatus();
+          const reason = latest.lastDisconnectReason || latest.lastError || 'Connection failed or timed out';
+          await interaction.editReply({
+            embeds: [
+              errorEmbed(
+                'Account Updated (Connection Failed)',
+                `Credentials for **${username}** were saved, and the old account was disconnected.\n\n` +
+                `**Protocol Phase**: \`${latest.phase}\`\n` +
+                `**Disconnect Reason**: \`${reason}\`\n` +
+                `**Socket / Error Code**: \`${latest.lastDisconnectCode || 'None'}\``
+              ),
+            ],
+          });
+        }
+      } else {
+        // Ensure no stale username/password/timers from a previous account remain in memory
+        mineflayerManager.disconnect(true);
+
+        await interaction.editReply({
+          embeds: [
+            successEmbed(
+              'Credentials Configured',
+              `Credentials for **${username}** stored with AES-256-GCM encryption at rest.\nPassword is never displayed or logged.\n\nUse \`/owneraccount connect\` to connect as **${username}**.`
+            ),
+          ],
+        });
+      }
     } else if (sub === 'status') {
       const status = mineflayerManager.getStatus();
       const uptimeStr = status.uptime ? `${Math.floor(status.uptime / 1000)}s` : 'N/A';
@@ -309,9 +360,9 @@ export const ownerAccountCommand: CommandModule = {
       });
     } else if (sub === 'remove') {
       await mineflayerSecurity.removeCredentials(guildId);
-      mineflayerManager.disconnect();
+      mineflayerManager.disconnect(true);
       await interaction.editReply({
-        embeds: [successEmbed('Credentials Removed', 'Stored Minecraft credentials deleted from database.')],
+        embeds: [successEmbed('Credentials Removed', 'Stored Minecraft credentials deleted from database and cleared from active session.')],
       });
     } else if (sub === 'send' || sub === 'cmd') {
       const command = interaction.options.getString('command', true);

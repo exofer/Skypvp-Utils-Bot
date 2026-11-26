@@ -14,13 +14,20 @@ export interface CredentialValidationResult {
 
 export class MineflayerSecurity {
   /**
-   * Save encrypted credentials for a guild or global bot instance
+   * Save encrypted credentials for a guild or global bot instance.
+   * Ensures only the newly configured account is marked enabled so startup
+   * never picks a stale account from another guild.
    */
   public async storeCredentials(guildId: string, username: string, password?: string) {
-    const encryptedUsername = encrypt(username);
+    const encryptedUsername = encrypt(username.trim());
     const encryptedPassword = password ? encrypt(password) : null;
 
-    log.info({ guildId }, 'Encrypting and persisting Mineflayer credentials');
+    log.info({ guildId, username: username.trim() }, 'Encrypting and persisting Mineflayer credentials');
+
+    await prisma.mineflayerAccountConfig.updateMany({
+      where: { guildId: { not: guildId }, enabled: true },
+      data: { enabled: false },
+    });
 
     return prisma.mineflayerAccountConfig.upsert({
       where: { guildId },
@@ -39,13 +46,29 @@ export class MineflayerSecurity {
   }
 
   /**
+   * Resolve the config for a specific guild, falling back to the most recently
+   * enabled config so owner commands work seamlessly across guilds/DMs.
+   */
+  private async resolveAccountConfig(guildId: string) {
+    const exact = await prisma.mineflayerAccountConfig.findUnique({
+      where: { guildId },
+    });
+    if (exact && exact.encryptedUsername) {
+      return exact;
+    }
+
+    return prisma.mineflayerAccountConfig.findFirst({
+      where: { enabled: true, encryptedUsername: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  /**
    * Validate whether credentials exist and can be successfully decrypted
    * with the current ENCRYPTION_KEY in .env
    */
   public async validateCredentials(guildId: string): Promise<CredentialValidationResult> {
-    const config = await prisma.mineflayerAccountConfig.findUnique({
-      where: { guildId },
-    });
+    const config = await this.resolveAccountConfig(guildId);
 
     if (!config || !config.encryptedUsername) {
       return {
@@ -67,7 +90,7 @@ export class MineflayerSecurity {
       };
     } catch (err: any) {
       log.error(
-        { guildId, err: err?.message },
+        { guildId: config.guildId, err: err?.message },
         'Failed to decrypt Mineflayer credentials. The ENCRYPTION_KEY in .env may have been modified.'
       );
       return {
@@ -83,9 +106,7 @@ export class MineflayerSecurity {
    * Retrieve and decrypt credentials
    */
   public async getCredentials(guildId: string): Promise<{ username: string; password?: string } | null> {
-    const config = await prisma.mineflayerAccountConfig.findUnique({
-      where: { guildId },
-    });
+    const config = await this.resolveAccountConfig(guildId);
 
     if (!config || !config.encryptedUsername) {
       return null;
@@ -96,17 +117,22 @@ export class MineflayerSecurity {
       const password = config.encryptedPassword ? decrypt(config.encryptedPassword) : undefined;
       return { username, password };
     } catch (err: any) {
-      log.error({ err: err?.message, guildId }, 'Failed to decrypt Mineflayer credentials');
+      log.error({ err: err?.message, guildId: config.guildId }, 'Failed to decrypt Mineflayer credentials');
       return null;
     }
   }
 
   /**
-   * Remove stored credentials
+   * Remove stored credentials (preserves proxy & server settings)
    */
   public async removeCredentials(guildId: string) {
-    return prisma.mineflayerAccountConfig.deleteMany({
-      where: { guildId },
+    return prisma.mineflayerAccountConfig.updateMany({
+      where: { OR: [{ guildId }, { enabled: true }] },
+      data: {
+        encryptedUsername: null,
+        encryptedPassword: null,
+        enabled: false,
+      },
     });
   }
 
@@ -160,6 +186,18 @@ export class MineflayerSecurity {
       } catch (err: any) {
         log.error({ err: err?.message, guildId }, 'Failed to decrypt stored proxy configuration');
       }
+    }
+
+    try {
+      const anyProxy = await prisma.mineflayerAccountConfig.findFirst({
+        where: { encryptedProxyUrl: { not: null } },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (anyProxy?.encryptedProxyUrl) {
+        return decrypt(anyProxy.encryptedProxyUrl);
+      }
+    } catch (err: any) {
+      log.error({ err: err?.message }, 'Failed to decrypt fallback proxy configuration');
     }
 
     // Fallback to environment variable if configured

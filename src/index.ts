@@ -196,6 +196,7 @@ async function bootstrap() {
   try {
     const account = await prisma.mineflayerAccountConfig.findFirst({
       where: { enabled: true },
+      orderBy: { updatedAt: 'desc' },
     });
     if (account) {
       const validation = await mineflayerSecurity.validateCredentials(account.guildId);
