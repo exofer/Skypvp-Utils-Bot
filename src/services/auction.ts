@@ -1,18 +1,44 @@
 import { prisma } from '../db/prisma.js';
 import { client } from '../bot.js';
-import { type DiscoveredAuctionListing } from '../mineflayer/observers/auction.js';
+import {
+  auctionObserver,
+  MAX_LEGACY_AUCTION_AGE_MS,
+  buildActiveAuctionWhere,
+  type DiscoveredAuctionListing,
+} from '../mineflayer/observers/auction.js';
 import { createLogger } from '../utils/logger.js';
 import { infoEmbed } from '../utils/embeds.js';
 import { COLORS } from '../config/constants.js';
 import { formatNumber } from '../utils/minecraft.js';
 
+export { buildActiveAuctionWhere };
+
 const log = createLogger('auction-service');
 
 export class AuctionService {
   /**
-   * Process a batch of scraped listings
+   * Process a batch of scraped listings and expire listings no longer on the market.
    */
   public async processListings(listings: DiscoveredAuctionListing[]): Promise<number> {
+    const now = new Date();
+    const maxAgeCutoff = new Date(now.getTime() - MAX_LEGACY_AUCTION_AGE_MS);
+
+    // Always expire listings whose explicit expiration time or max age has passed
+    try {
+      await prisma.auctionListing.updateMany({
+        where: {
+          status: 'ACTIVE',
+          OR: [
+            { expiresAt: { lte: now } },
+            { expiresAt: null, detectedAt: { lte: maxAgeCutoff } },
+          ],
+        },
+        data: { status: 'EXPIRED' },
+      });
+    } catch (err: any) {
+      log.warn({ err: err?.message }, 'Failed to expire aged auction listings');
+    }
+
     if (listings.length === 0) return 0;
 
     let newCount = 0;
@@ -24,7 +50,19 @@ export class AuctionService {
           where: { externalId: item.externalId },
         });
 
-        if (existing) continue;
+        if (existing) {
+          // Keep active and refresh expiresAt if newly parsed
+          if (existing.status !== 'ACTIVE' || (item.expiresAt && !existing.expiresAt)) {
+            await prisma.auctionListing.update({
+              where: { id: existing.id },
+              data: {
+                status: 'ACTIVE',
+                expiresAt: item.expiresAt ?? existing.expiresAt,
+              },
+            });
+          }
+          continue;
+        }
 
         // Record listing in DB
         const created = await prisma.auctionListing.create({
@@ -37,6 +75,8 @@ export class AuctionService {
             currentPrice: item.currentPrice,
             buyoutPrice: item.buyoutPrice,
             currency: item.currency || 'MONEY',
+            expiresAt: item.expiresAt ?? null,
+            status: 'ACTIVE',
           },
         });
 
@@ -50,6 +90,40 @@ export class AuctionService {
       } catch (err: any) {
         log.error({ err: err?.message, externalId: item.externalId }, 'Error processing auction listing');
       }
+    }
+
+    // Reconcile listings that disappeared from the scraped AH page
+    try {
+      const activeExternalIds = listings.map((l) => l.externalId);
+      if (auctionObserver.lastTotalPages === 1) {
+        await prisma.auctionListing.updateMany({
+          where: {
+            status: 'ACTIVE',
+            externalId: { notIn: activeExternalIds },
+          },
+          data: { status: 'EXPIRED' },
+        });
+      } else {
+        // Multi-page AH: only expire items newer than the oldest item still visible on Page 1
+        const oldestOnPage1 = await prisma.auctionListing.findFirst({
+          where: { externalId: { in: activeExternalIds } },
+          orderBy: { detectedAt: 'asc' },
+          select: { detectedAt: true },
+        });
+
+        if (oldestOnPage1) {
+          await prisma.auctionListing.updateMany({
+            where: {
+              status: 'ACTIVE',
+              detectedAt: { gt: oldestOnPage1.detectedAt },
+              externalId: { notIn: activeExternalIds },
+            },
+            data: { status: 'EXPIRED' },
+          });
+        }
+      }
+    } catch (err: any) {
+      log.warn({ err: err?.message }, 'Failed to reconcile disappeared auction listings');
     }
 
     return newCount;

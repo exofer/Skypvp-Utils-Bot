@@ -256,4 +256,54 @@ describe('Auction GUI & NBT Parsing Robustness', () => {
     expect(parsed?.currentPrice).toBe(25000);
     expect(parsed?.seller).toBe('ArmorSmith');
   });
+
+  it('parses expiration time from lore into expiresAt and skips already-expired items', async () => {
+    const { parseDurationToMs } = await import('../src/mineflayer/observers/auction.js');
+    expect(parseDurationToMs('Expires: 11h 59m 45s')).toBe(
+      11 * 3_600_000 + 59 * 60_000 + 45 * 1_000
+    );
+
+    const activeItem = {
+      slot: 10,
+      name: 'diamond_sword',
+      displayName: 'Sharp Sword',
+      count: 1,
+      customLore: [
+        '§7Seller: §fPlayerOne',
+        '§7Price: §a$50,000',
+        '§7Expires: §e2h 30m',
+      ],
+    };
+    const parsedActive = auctionObserver.parseAuctionItem(activeItem);
+    expect(parsedActive).not.toBeNull();
+    expect(parsedActive?.expiresAt).toBeInstanceOf(Date);
+    expect(parsedActive!.expiresAt!.getTime()).toBeGreaterThan(Date.now() + 2 * 3_600_000);
+
+    const expiredItem = {
+      slot: 11,
+      name: 'diamond_sword',
+      displayName: 'Old Sword',
+      count: 1,
+      customLore: [
+        '§7Seller: §fPlayerOne',
+        '§7Price: §a$50,000',
+        '§cExpires: Expired',
+      ],
+    };
+    expect(auctionObserver.parseAuctionItem(expiredItem)).toBeNull();
+  });
+
+  it('buildActiveAuctionWhere filters strictly for active, non-expired market listings', async () => {
+    const { buildActiveAuctionWhere } = await import('../src/mineflayer/observers/auction.js');
+    const where = buildActiveAuctionWhere('Dragon', 'GOLD');
+
+    expect(where.status).toBe('ACTIVE');
+    expect(where.itemName).toEqual({ contains: 'Dragon' });
+    expect(where.currency).toBe('GOLD');
+    expect(Array.isArray(where.OR)).toBe(true);
+    expect(where.OR).toHaveLength(2);
+    expect(where.OR[0].expiresAt.gt).toBeInstanceOf(Date);
+    expect(where.OR[1].expiresAt).toBeNull();
+    expect(where.OR[1].detectedAt.gt).toBeInstanceOf(Date);
+  });
 });

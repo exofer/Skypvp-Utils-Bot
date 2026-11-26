@@ -17,11 +17,61 @@ export interface DiscoveredAuctionListing {
   currentPrice: number;
   buyoutPrice?: number;
   currency: AuctionCurrency;
+  expiresAt?: Date;
   rawLore: string[];
+}
+
+/**
+ * Parse duration strings like "11h 59m 45s", "1d 2h", "45m" into milliseconds.
+ */
+export function parseDurationToMs(text: string): number | null {
+  const regex = /(\d+)\s*(d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b/gi;
+  let totalMs = 0;
+  let matched = false;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(text)) !== null) {
+    const val = parseInt(m[1]!, 10);
+    const unit = m[2]!.toLowerCase();
+    if (isNaN(val)) continue;
+    matched = true;
+    if (unit.startsWith('d')) totalMs += val * 86_400_000;
+    else if (unit.startsWith('h')) totalMs += val * 3_600_000;
+    else if (unit.startsWith('m')) totalMs += val * 60_000;
+    else if (unit.startsWith('s')) totalMs += val * 1_000;
+  }
+  return matched ? totalMs : null;
+}
+
+export const MAX_LEGACY_AUCTION_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours fallback when expiresAt is absent
+
+/**
+ * Build a Prisma `where` filter matching only auctions currently active on the market.
+ */
+export function buildActiveAuctionWhere(itemQuery?: string, currencyFilter?: string | null): any {
+  const now = new Date();
+  const maxAgeCutoff = new Date(now.getTime() - MAX_LEGACY_AUCTION_AGE_MS);
+
+  const where: any = {
+    status: 'ACTIVE',
+    OR: [
+      { expiresAt: { gt: now } },
+      { expiresAt: null, detectedAt: { gt: maxAgeCutoff } },
+    ],
+  };
+
+  if (itemQuery) {
+    where.itemName = { contains: itemQuery };
+  }
+  if (currencyFilter && currencyFilter !== 'ALL') {
+    where.currency = currencyFilter;
+  }
+
+  return where;
 }
 
 export class AuctionObserver {
   private isScanning = false;
+  public lastTotalPages: number | null = null;
 
   /**
    * Run `/ah` in-game and parse the resulting inventory GUI
@@ -67,6 +117,9 @@ export class AuctionObserver {
         try {
           const title = stripColorCodes(window.title || '');
           log.info({ title }, 'Auction House GUI window captured');
+
+          const pageMatch = title.match(/\((\d+)\s*\/\s*(\d+)\)/);
+          this.lastTotalPages = pageMatch && pageMatch[2] ? parseInt(pageMatch[2], 10) : null;
 
           const listings: DiscoveredAuctionListing[] = [];
           // Examine container slots (slots 0-44 are item listings, row 5 (45-53) is pagination/buttons)
@@ -154,10 +207,11 @@ export class AuctionObserver {
         }
       }
 
-      // Parse seller, price, buyout, and currency from lore
+      // Parse seller, price, buyout, expiration, and currency from lore
       let seller = 'Unknown';
       let price = 0;
       let buyoutPrice: number | undefined;
+      let expiresAt: Date | undefined;
       let detectedCurrency: AuctionCurrency = 'MONEY';
 
       // First pass: check for explicit Currency: lines
@@ -243,6 +297,22 @@ export class AuctionObserver {
             }
           }
         }
+
+        // Expiration parsing (e.g. "Expires: 11h 59m 45s", "Time left: 2d 4h", "Ends in: 30m")
+        if (
+          lower.includes('expire') ||
+          lower.includes('time left') ||
+          lower.includes('ends in') ||
+          lower.includes('remaining')
+        ) {
+          const durationMs = parseDurationToMs(line);
+          if (durationMs !== null && durationMs > 0) {
+            expiresAt = new Date(Date.now() + durationMs);
+          } else if (lower.includes('expired')) {
+            // Item is already expired in the GUI; do not treat as active
+            return null;
+          }
+        }
       }
 
       // If price was not found under 'Price:' but buyout is present, use buyoutPrice
@@ -305,6 +375,7 @@ export class AuctionObserver {
         currentPrice: price,
         buyoutPrice,
         currency: detectedCurrency,
+        expiresAt,
         rawLore: lore,
       };
     } catch (err: any) {

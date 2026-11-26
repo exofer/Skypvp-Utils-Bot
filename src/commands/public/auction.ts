@@ -8,7 +8,7 @@ import {
 } from 'discord.js';
 import { PermissionLevel } from '../../permissions/levels.js';
 import type { CommandModule } from '../../types/index.js';
-import { auctionService } from '../../services/auction.js';
+import { auctionService, buildActiveAuctionWhere } from '../../services/auction.js';
 import { prisma } from '../../db/prisma.js';
 import { infoEmbed, successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { formatNumber } from '../../utils/minecraft.js';
@@ -135,12 +135,7 @@ export const auctionCommand: CommandModule = {
       const currencyFilter = interaction.options.getString('currency');
       await interaction.deferReply();
 
-      const where: any = {
-        itemName: { contains: itemQuery },
-      };
-      if (currencyFilter && currencyFilter !== 'ALL') {
-        where.currency = currencyFilter;
-      }
+      const where = buildActiveAuctionWhere(itemQuery, currencyFilter);
 
       const pageSize = 5;
       const totalCount = await prisma.auctionListing.count({ where });
@@ -155,8 +150,8 @@ export const auctionCommand: CommandModule = {
         const embed = infoEmbed(
           `Auction Search: "${itemQuery}"${filterDesc}`,
           totalCount === 0
-            ? `No listings matching **"${itemQuery}"**${filterDesc} have been detected yet.`
-            : `Showing page **${page}** of **${totalPages}** (${totalCount} total listings found):`
+            ? `No active listings matching **"${itemQuery}"**${filterDesc} are currently on the market.`
+            : `Showing page **${page}** of **${totalPages}** (${totalCount} active listings on the market):`
         );
 
         for (const item of items) {
@@ -166,9 +161,12 @@ export const auctionCommand: CommandModule = {
           const buyout = item.buyoutPrice
             ? ` | Buyout: ${isGold ? `🪙 ${formatNumber(item.buyoutPrice)} Gold` : `$${formatNumber(item.buyoutPrice)}`}`
             : '';
+          const expiresText = item.expiresAt
+            ? ` • Expires <t:${Math.floor(new Date(item.expiresAt).getTime() / 1000)}:R>`
+            : '';
           embed.addFields({
             name: `${item.itemName} (x${item.quantity}) • [${currBadge}]`,
-            value: `**Price**: ${priceText}${buyout}\n**Seller**: \`${item.seller || 'Unknown'}\` • <t:${Math.floor(item.detectedAt.getTime() / 1000)}:R>`,
+            value: `**Price**: ${priceText}${buyout}\n**Seller**: \`${item.seller || 'Unknown'}\` • Listed <t:${Math.floor(item.detectedAt.getTime() / 1000)}:R>${expiresText}`,
             inline: false,
           });
         }
